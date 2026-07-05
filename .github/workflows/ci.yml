@@ -59,74 +59,24 @@ jobs:
           echo "Postgres did not become ready in 30s" >&2
           exit 1
 
-      # Ruff/mypy are scoped to the directories whose lint/type debt has been
-      # paid down (hable_ya, api, eval/agent from spec 034, and the spec-021
-      # and spec-034 tests). The rest of the repo (eval/ outside agent/,
-      # finetune/, scripts/fixtures/, older tests/) has pre-existing issues
-      # that are out of scope for this job.
+      # Ruff runs over the whole of hable_ya/api/eval-agent/tests/scripts. Mypy
+      # is kept to the strictly-typed source (hable_ya, api, eval/agent) — tests
+      # and utility scripts are best-effort-typed (see pyproject overrides) and
+      # are exercised by pytest, so they aren't type-gated here. Directory
+      # targets (not a hand-maintained file list) so the job doesn't rot as
+      # files are added/renamed/removed.
       - name: Ruff
-        run: |
-          uv run ruff check \
-            hable_ya/ api/ eval/agent/ \
-            tests/test_tool_handler.py \
-            tests/test_runner.py \
-            tests/test_health.py \
-            tests/test_prompts.py \
-            tests/test_db.py \
-            tests/test_init_db.py \
-            tests/conftest.py \
-            tests/test_agent_personas.py \
-            tests/test_agent_cache.py \
-            tests/test_agent_accumulator.py \
-            tests/test_agent_learner.py \
-            tests/test_agent_judge_prompts.py \
-            tests/test_agent_aggregates.py \
-            tests/test_aggregations_shared.py \
-            tests/test_learner_profile.py \
-            tests/test_placement_policy.py \
-            tests/test_leveling_policy.py \
-            tests/test_band_history.py \
-            scripts/voice_client.py \
-            scripts/replay_placement.py
+        run: uv run ruff check hable_ya/ api/ eval/agent/ tests/ scripts/
 
       - name: Mypy
-        run: |
-          uv run mypy \
-            hable_ya/ api/ eval/agent/ \
-            tests/test_tool_handler.py \
-            tests/test_runner.py \
-            tests/test_health.py \
-            tests/test_prompts.py \
-            tests/test_db.py \
-            tests/test_init_db.py \
-            tests/conftest.py \
-            tests/test_agent_personas.py \
-            tests/test_agent_cache.py \
-            tests/test_agent_accumulator.py \
-            tests/test_agent_learner.py \
-            tests/test_agent_judge_prompts.py \
-            tests/test_agent_aggregates.py \
-            tests/test_aggregations_shared.py \
-            tests/test_learner_profile.py \
-            tests/test_placement_policy.py \
-            tests/test_leveling_policy.py \
-            tests/test_band_history.py \
-            scripts/replay_placement.py
+        run: uv run mypy hable_ya/ api/ eval/agent/
 
       - name: Pytest
         env:
           HABLE_YA_DATABASE_URL: postgresql://hable_ya:hable_ya@localhost:5432/hable_ya
         run: uv run pytest tests/ -v
 
-      # Spec 049: replay_placement.py against the cold_start fixtures is
-      # the regression bar for model band-emission quality. Advisory in
-      # this slice's landing PR; promote to blocking once prompt
-      # engineering clears accuracy ≥ 0.75 / MAE ≤ 0.20 (see open
-      # question 3 in the spec). Requires a live llama.cpp endpoint, so
-      # this step is gated on an opt-in env var.
-      - name: Replay placement (advisory)
-        if: env.HABLE_YA_RUN_REPLAY == '1'
-        continue-on-error: true
-        env:
-          HABLE_YA_LLAMA_CPP_URL: ${{ env.HABLE_YA_LLAMA_CPP_URL }}
-        run: uv run python -m scripts.replay_placement --verbose
+      # NOTE (cloud fork): the old "Replay placement" step ran the on-device
+      # llama.cpp band-emission regression (hable-ya spec 049). It's dropped
+      # here — replay_placement.py targets a llama.cpp endpoint that no longer
+      # exists. A cloud eval-regression gate is #012's job.
