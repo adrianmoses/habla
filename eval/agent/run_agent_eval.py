@@ -53,11 +53,11 @@ from eval.fixtures.schema import CEFRBand, FluencySignal, SystemParams, Theme
 from eval.run_eval import MINIMAL_SYSTEM_PROMPT
 from eval.scoring.recast import content_lemma_surfaces
 from eval.scoring.turn import parse_tool_calls, strip_tool_calls
-from finetune.format import render_system_prompt
 from hable_ya.learner.aggregations import LearnerProfileSnapshot
 from hable_ya.learner.bands import is_valid_cefr_band
 from hable_ya.learner.profile import snapshot_to_profile
 from hable_ya.learner.themes import THEMES_BY_LEVEL
+from hable_ya.pipeline.prompts.render import render_system_prompt
 
 console = Console()
 
