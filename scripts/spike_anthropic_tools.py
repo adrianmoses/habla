@@ -161,7 +161,7 @@ async def main() -> int:
     await task.queue_frame(EndFrame())
     try:
         await asyncio.wait_for(run_task, timeout=15)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         run_task.cancel()
 
     turn1_text = capture.turns_text[0].strip() if capture.turns_text else ""
