@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | id | 007 |
-| status | draft |
+| status | approved |
 | created | 2026-07-05 |
 | covers roadmap | #007, #008 (bundle) |
 
