@@ -1,12 +1,13 @@
 """Main eval entrypoint.
 
-Run all standard fixtures against a model served via llama.cpp's
-OpenAI-compatible API, score each response, and write results to JSON.
+Run all standard fixtures against Claude via the Anthropic API — the same native
+`log_turn` tool contract the runtime uses — score each response, and write
+results to JSON.
 
 Usage::
 
-    python -m eval.run_eval --base-url http://localhost:8080 --output results.json
-    python -m eval.run_eval --categories single_error_recast,multi_error --output results.json
+    python -m eval.run_eval --output results.json
+    python -m eval.run_eval --model claude-sonnet-4-6 --categories single_error_recast --output results.json
 """
 
 from __future__ import annotations
@@ -18,12 +19,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-import openai
+import anthropic
 from rich.console import Console
 from rich.progress import Progress
 
+from eval.claude_agent import call_claude
 from eval.fixtures.schema import ColdStartFixture, Fixture, load_fixtures
 from eval.scoring.turn import EvalOutput, TurnResult, score_turn
+from hable_ya.config import settings
 from hable_ya.pipeline.prompts.render import render_system_prompt
 
 console = Console()
@@ -40,62 +43,48 @@ MINIMAL_SYSTEM_PROMPT = "You are a Spanish conversation partner for a language l
 
 
 async def call_model(
-    client: openai.AsyncOpenAI,
+    client: anthropic.AsyncAnthropic,
     fixture: Fixture,
     semaphore: asyncio.Semaphore,
     timeout: float,
+    model: str,
     minimal_prompt: bool = False,
     max_tokens: int = 1024,
-    no_thinking: bool = False,
-) -> tuple[str, list[Any] | None]:
-    """Send a fixture to the model and return (response_text, tool_calls).
+) -> tuple[str, list[dict[str, Any]]]:
+    """Send a fixture to Claude and return (response_text, tool_calls).
 
-    ``minimal_prompt=True`` sends only a role-setting system message. Use for
-    measuring raw untuned-model baseline (no prompt engineering at all).
+    ``minimal_prompt=True`` sends only a role-setting system message — the
+    unprompted baseline (no register rules, recast instructions, or tool
+    guidance). Use to measure how much the runtime prompt engineering buys.
 
-    ``max_tokens`` caps generation length. With Gemma 4 thinking enabled the
-    model spends ~150-450 tokens on hidden reasoning before any visible
-    content; 1024 leaves room for both. Drop to ~256 only when pairing with
-    ``no_thinking=True``.
-
-    ``no_thinking=True`` disables the chat template's thinking block via
-    ``chat_template_kwargs={"enable_thinking": False}``. Faster and fits in
-    smaller token budgets, but the model loses its error-detection step and
-    will under-populate ``errors`` in tool calls.
+    The full-prompt path renders with ``tool_mode="native"`` and Claude emits
+    ``log_turn`` as a native tool call (see ``eval.claude_agent.call_claude``).
     """
     system_content = (
         MINIMAL_SYSTEM_PROMPT
         if minimal_prompt
         else render_system_prompt(
-            fixture.system_params, band=fixture.metadata.cefr_band
+            fixture.system_params,
+            band=fixture.metadata.cefr_band,
+            tool_mode="native",
         )
     )
     messages: list[dict[str, str]] = [
-        {"role": "system", "content": system_content},
+        {"role": turn.role, "content": turn.content}
+        for turn in fixture.conversation
     ]
-    for turn in fixture.conversation:
-        messages.append({"role": turn.role, "content": turn.content})
-
-    extra_body: dict[str, Any] = {}
-    if no_thinking:
-        extra_body["chat_template_kwargs"] = {"enable_thinking": False}
 
     async with semaphore:
-        response = await asyncio.wait_for(
-            client.chat.completions.create(
-                model="gemma-4-e4b",
-                messages=messages,  # type: ignore[arg-type]
-                temperature=0.0,
+        return await asyncio.wait_for(
+            call_claude(
+                client,
+                model=model,
+                system=system_content,
+                messages=messages,
                 max_tokens=max_tokens,
-                extra_body=extra_body or None,
             ),
             timeout=timeout,
         )
-
-    choice = response.choices[0]
-    text = choice.message.content or ""
-    tool_calls = choice.message.tool_calls
-    return text, tool_calls
 
 
 # ---------------------------------------------------------------------------
@@ -211,10 +200,7 @@ async def run_eval(args: argparse.Namespace) -> EvalOutput:
         f"(skipping {cold_start_count} cold start) — prompt mode: {prompt_mode}"
     )
 
-    client = openai.AsyncOpenAI(
-        base_url=args.base_url.rstrip("/") + "/v1",
-        api_key="not-needed",
-    )
+    client = anthropic.AsyncAnthropic()
     semaphore = asyncio.Semaphore(args.concurrency)
 
     results: list[TurnResult] = []
@@ -230,9 +216,9 @@ async def run_eval(args: argparse.Namespace) -> EvalOutput:
                     fixture,
                     semaphore,
                     args.timeout,
+                    model=args.model,
                     minimal_prompt=args.minimal_prompt,
                     max_tokens=args.max_tokens,
-                    no_thinking=args.no_thinking,
                 )
                 result = score_turn(fixture, response_text, tool_calls)
                 results.append(result)
@@ -255,7 +241,7 @@ async def run_eval(args: argparse.Namespace) -> EvalOutput:
     output = EvalOutput(
         run_id=str(uuid.uuid4()),
         timestamp=datetime.now(UTC).isoformat(),
-        base_url=args.base_url,
+        model=args.model,
         fixture_count=len(standard),
         cold_start_skipped=cold_start_count,
         results=results,
@@ -275,11 +261,11 @@ async def run_eval(args: argparse.Namespace) -> EvalOutput:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run model eval against fixtures")
+    parser = argparse.ArgumentParser(description="Run Claude eval against fixtures")
     parser.add_argument(
-        "--base-url",
-        default="http://localhost:8080",
-        help="llama.cpp OpenAI-compatible endpoint (default: http://localhost:8080)",
+        "--model",
+        default=settings.llm_model_name,
+        help=f"Claude model under test (default: {settings.llm_model_name})",
     )
     parser.add_argument(
         "--output",
@@ -307,26 +293,16 @@ def main() -> None:
         "--minimal-prompt",
         action="store_true",
         help="Send only a role-setting system prompt (no register rules, no "
-        "recast instructions, no tool-call schema). Use to measure the raw "
-        "untuned baseline — i.e., Gemma 4 with no prompt engineering. "
+        "recast instructions, no tool-call schema). Use to measure the "
+        "unprompted baseline — how much the runtime prompt engineering buys. "
         "Tool-fidelity metrics will typically be near zero in this mode.",
     )
     parser.add_argument(
         "--max-tokens",
         type=int,
         default=1024,
-        help="Max completion tokens per request (default: 1024). Gemma 4's "
-        "thinking block can consume 150-450 tokens before any visible "
-        "content; budgets below ~512 cause silent (empty-content) responses "
-        "on harder fixtures unless paired with --no-thinking.",
-    )
-    parser.add_argument(
-        "--no-thinking",
-        action="store_true",
-        help="Disable Gemma 4's chat-template thinking block via "
-        "chat_template_kwargs.enable_thinking=False. ~4x faster and fits in "
-        "smaller token budgets, but the model loses its error-detection "
-        "step and will under-populate the `errors` field in log_turn calls.",
+        help="Max completion tokens per request (default: 1024) — room for a "
+        "short reply plus the native log_turn tool-call args.",
     )
     args = parser.parse_args()
     asyncio.run(run_eval(args))

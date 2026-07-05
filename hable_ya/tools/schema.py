@@ -125,3 +125,18 @@ LOG_TURN_FUNCTION_SCHEMA = FunctionSchema(
 )
 
 HABLE_YA_TOOLS_SCHEMA = ToolsSchema(standard_tools=[LOG_TURN_FUNCTION_SCHEMA])
+
+
+# Anthropic Messages-API tool shape, for callers that use the Anthropic SDK
+# directly rather than through Pipecat (the eval harness, spec 012). Same
+# argument contract as the runtime tool, just the `{name, description,
+# input_schema}` form the SDK expects.
+LOG_TURN_ANTHROPIC_TOOL: dict[str, object] = {
+    "name": LOG_TURN_NAME,
+    "description": LOG_TURN_DESCRIPTION,
+    "input_schema": {
+        "type": "object",
+        "properties": LOG_TURN_PROPERTIES,
+        "required": LOG_TURN_REQUIRED,
+    },
+}

@@ -5,9 +5,9 @@ Runs one session per authored persona end-to-end:
 1. Load personas from `eval/agent/personas/*.json`.
 2. For each persona, simulate a session: alternate (learner, agent) turns
    up to `turn_budget`. The learner is `SyntheticLearner` (Opus); the
-   agent is the served llama.cpp model called via the OpenAI-compatible
-   `/v1/chat/completions` endpoint, prompted via the *same*
-   `finetune.format.render_system_prompt` the runtime uses.
+   agent under test is Claude via the Anthropic SDK with native `log_turn`
+   tool-calling (`eval.claude_agent.call_claude`), prompted via the *same*
+   `render_system_prompt` (`tool_mode="native"`) the runtime uses.
 3. After each agent turn, parse `log_turn` from the response and feed the
    resulting `TurnRecord` to the in-process `ProfileAccumulator` so the
    next turn's system prompt reflects the evolving learner profile.
@@ -32,7 +32,6 @@ from pathlib import Path
 from typing import Any
 
 import anthropic
-import openai
 from dotenv import load_dotenv
 from rich.console import Console
 from rich.progress import Progress
@@ -49,10 +48,12 @@ from eval.agent.types import (
     SessionRecord,
     TurnRecord,
 )
+from eval.claude_agent import call_claude
 from eval.fixtures.schema import CEFRBand, FluencySignal, SystemParams, Theme
 from eval.run_eval import MINIMAL_SYSTEM_PROMPT
 from eval.scoring.recast import content_lemma_surfaces
 from eval.scoring.turn import parse_tool_calls, strip_tool_calls
+from hable_ya.config import settings
 from hable_ya.learner.aggregations import LearnerProfileSnapshot
 from hable_ya.learner.bands import is_valid_cefr_band
 from hable_ya.learner.profile import snapshot_to_profile
@@ -61,19 +62,18 @@ from hable_ya.pipeline.prompts.render import render_system_prompt
 
 console = Console()
 
-DEFAULT_BASE_URL = "http://localhost:8080"
 DEFAULT_CACHE_DIR = Path(".cache/agent_eval")
 DEFAULT_PERSONAS_DIR = Path("eval/agent/personas")
 DEFAULT_CONCURRENCY = 4
 DEFAULT_TIMEOUT_S = 120.0
 DEFAULT_MAX_TOKENS = 1024
-LLAMA_MODEL_ID = "gemma-4-e4b"
 
-# Per spec OQ#6 cost table: short Opus learner turn (~$15/Mtok in,
-# $75/Mtok out) averages ~$0.018; one judge call (full transcript +
-# rubric) averages ~$0.06. Used by `_cost_preview` only.
+# Cost estimate (Opus for learner/judge; Sonnet for the agent under test),
+# used by `_cost_preview` only. Short Opus learner turn ~$0.018; one judge
+# call (full transcript + rubric) ~$0.06; a Sonnet agent turn ~$0.01.
 COST_PER_LEARNER_TURN_USD = 0.018
 COST_PER_JUDGE_CALL_USD = 0.06
+COST_PER_AGENT_TURN_USD = 0.01
 
 # Single source of truth for the 5 session-level dimension names. Shared
 # with `eval.agent.compare` so the two grouping orders cannot drift.
@@ -114,37 +114,27 @@ def _build_agent_system_prompt(
 
 
 async def _call_agent(
-    client: openai.AsyncOpenAI,
+    client: anthropic.AsyncAnthropic,
     *,
+    model: str,
     system_prompt: str,
     transcript: list[ConversationTurn],
     timeout: float,
     max_tokens: int,
-    no_thinking: bool,
-) -> tuple[str, list[Any] | None]:
+) -> tuple[str, list[dict[str, Any]]]:
     messages: list[dict[str, str]] = [
-        {"role": "system", "content": system_prompt}
+        {"role": t.role, "content": t.content} for t in transcript
     ]
-    for t in transcript:
-        messages.append({"role": t.role, "content": t.content})
-
-    extra_body: dict[str, Any] = {}
-    if no_thinking:
-        extra_body["chat_template_kwargs"] = {"enable_thinking": False}
-
-    response = await asyncio.wait_for(
-        client.chat.completions.create(
-            model=LLAMA_MODEL_ID,
-            messages=messages,  # type: ignore[arg-type]
-            temperature=0.0,
+    return await asyncio.wait_for(
+        call_claude(
+            client,
+            model=model,
+            system=system_prompt,
+            messages=messages,
             max_tokens=max_tokens,
-            extra_body=extra_body or None,
         ),
         timeout=timeout,
     )
-    choice = response.choices[0]
-    text = choice.message.content or ""
-    return text, choice.message.tool_calls
 
 
 def _build_turn_record(
@@ -189,12 +179,12 @@ def _build_turn_record(
 async def simulate_session(
     persona: Persona,
     learner: SyntheticLearner,
-    agent_client: openai.AsyncOpenAI,
+    agent_client: anthropic.AsyncAnthropic,
     accumulator: ProfileAccumulator,
     *,
+    model: str,
     max_turns: int,
     minimal_prompt: bool,
-    no_thinking: bool,
     timeout: float,
     max_tokens: int,
 ) -> tuple[list[ConversationTurn], list[TurnRecord], float]:
@@ -226,11 +216,11 @@ async def simulate_session(
         try:
             agent_text, tool_calls = await _call_agent(
                 agent_client,
+                model=model,
                 system_prompt=system_prompt,
                 transcript=transcript,
                 timeout=timeout,
                 max_tokens=max_tokens,
-                no_thinking=no_thinking,
             )
         except Exception as e:
             console.print(
@@ -349,7 +339,9 @@ def _cost_preview(
     avg_turns = sum(p.turn_budget for p in personas) / max(1, len(personas))
     learner_cost = learner_uncached * avg_turns * COST_PER_LEARNER_TURN_USD
     judge_cost = len(personas) * COST_PER_JUDGE_CALL_USD
-    total = learner_cost + judge_cost
+    # The agent under test (Claude) is never cached — every persona turn bills.
+    agent_cost = len(personas) * avg_turns * COST_PER_AGENT_TURN_USD
+    total = learner_cost + judge_cost + agent_cost
 
     return {
         "personas": len(personas),
@@ -377,8 +369,7 @@ async def run_agent_eval(args: argparse.Namespace) -> AgentEvalOutput:
         return AgentEvalOutput(
             run_id=str(uuid.uuid4()),
             timestamp=datetime.now(UTC).isoformat(),
-            base_url=args.base_url,
-            model_label=args.model_label,
+            model_label=args.model,
             session_count=0,
             sessions=[],
             aggregates={},
@@ -401,17 +392,12 @@ async def run_agent_eval(args: argparse.Namespace) -> AgentEvalOutput:
         return AgentEvalOutput(
             run_id=str(uuid.uuid4()),
             timestamp=datetime.now(UTC).isoformat(),
-            base_url=args.base_url,
-            model_label=args.model_label,
+            model_label=args.model,
             session_count=0,
             sessions=[],
             aggregates={},
         )
 
-    llama_client = openai.AsyncOpenAI(
-        base_url=args.base_url.rstrip("/") + "/v1",
-        api_key="not-needed",
-    )
     anthropic_client = anthropic.AsyncAnthropic()
     semaphore = asyncio.Semaphore(args.concurrency)
 
@@ -428,11 +414,11 @@ async def run_agent_eval(args: argparse.Namespace) -> AgentEvalOutput:
                 transcript, turn_records, elapsed = await simulate_session(
                     persona,
                     learner,
-                    llama_client,
+                    anthropic_client,
                     accumulator,
+                    model=args.model,
                     max_turns=persona.turn_budget,
                     minimal_prompt=args.minimal_prompt,
-                    no_thinking=args.no_thinking,
                     timeout=args.timeout,
                     max_tokens=args.max_tokens,
                 )
@@ -451,7 +437,7 @@ async def run_agent_eval(args: argparse.Namespace) -> AgentEvalOutput:
                         transcript=transcript,
                         turn_records=turn_records,
                         verdict=verdict,
-                        model_label=args.model_label,
+                        model_label=args.model,
                         elapsed_s=round(elapsed, 2),
                     )
                 )
@@ -476,8 +462,7 @@ async def run_agent_eval(args: argparse.Namespace) -> AgentEvalOutput:
     output = AgentEvalOutput(
         run_id=str(uuid.uuid4()),
         timestamp=datetime.now(UTC).isoformat(),
-        base_url=args.base_url,
-        model_label=args.model_label,
+        model_label=args.model,
         session_count=len(sessions),
         sessions=sessions,
         aggregates=aggregates,
@@ -493,12 +478,13 @@ async def run_agent_eval(args: argparse.Namespace) -> AgentEvalOutput:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run session-level agent eval against llama.cpp + Opus."
+        description="Run session-level agent eval: Claude under test + Opus "
+        "learner/judge."
     )
     parser.add_argument(
-        "--base-url",
-        default=DEFAULT_BASE_URL,
-        help=f"llama.cpp endpoint (default: {DEFAULT_BASE_URL})",
+        "--model",
+        default=settings.llm_model_name,
+        help=f"Claude model under test (default: {settings.llm_model_name})",
     )
     parser.add_argument("--output", required=True, help="Output JSON path")
     parser.add_argument(
@@ -546,16 +532,6 @@ def main() -> None:
         "--minimal-prompt",
         action="store_true",
         help="Send only the role-setting system prompt (baseline mode).",
-    )
-    parser.add_argument(
-        "--no-thinking",
-        action="store_true",
-        help="Disable Gemma thinking via chat_template_kwargs.",
-    )
-    parser.add_argument(
-        "--model-label",
-        default=LLAMA_MODEL_ID,
-        help="Label stored in each session record + aggregate report.",
     )
     parser.add_argument(
         "--dry-run",
