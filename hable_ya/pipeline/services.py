@@ -5,9 +5,9 @@ Call `load_services(settings)` from a FastAPI `lifespan` context, then call
 `warmup_llm(settings)` to confirm the Anthropic API accepts a request before
 flipping the app to ready.
 
-The LLM is Claude via the Anthropic API (spec 001). STT (faster-whisper) and
-TTS (Piper) remain on-device in this slice; roadmap #007/#008 move them to
-managed APIs.
+All three services are now managed APIs: Claude (LLM, spec 001), OpenAI
+transcription (STT) and Cartesia (TTS) (spec 007). Only the small Silero VAD +
+SmartTurn ONNX models remain local (CPU), so the model path needs no GPU.
 """
 
 from __future__ import annotations
@@ -17,9 +17,8 @@ from dataclasses import dataclass
 
 from anthropic import AsyncAnthropic
 from pipecat.services.anthropic.llm import AnthropicLLMService
-from pipecat.services.piper.tts import PiperTTSService
-from pipecat.services.whisper.stt import Model as WhisperModel
-from pipecat.services.whisper.stt import WhisperSTTService
+from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.openai.stt import OpenAISTTService
 from pipecat.transcriptions.language import Language
 
 from hable_ya.config import Settings
@@ -29,25 +28,19 @@ logger = logging.getLogger("hable_ya.pipeline.services")
 
 @dataclass
 class Services:
-    stt: WhisperSTTService
+    stt: OpenAISTTService
     llm: AnthropicLLMService
-    tts: PiperTTSService
+    tts: CartesiaTTSService
 
 
 def load_services(settings: Settings) -> Services:
     logger.info("Loading Pipecat services")
-    stt = WhisperSTTService(
-        model=WhisperModel[settings.whisper_model.upper()],
-        device=settings.whisper_device,
-        compute_type=settings.whisper_compute_type,
-        no_speech_prob=0.6,
+    stt = OpenAISTTService(
+        api_key=settings.openai_api_key,
+        model=settings.stt_model,
         language=Language.ES,
     )
-    logger.info(
-        "  Whisper STT ready (%s, %s)",
-        settings.whisper_model,
-        settings.whisper_device,
-    )
+    logger.info("  OpenAI STT ready (%s)", settings.stt_model)
 
     # Thinking is disabled: a real-time voice turn must not stall on a
     # reasoning pass. This is the Claude analog of the on-device Gemma
@@ -66,12 +59,18 @@ def load_services(settings: Settings) -> Services:
     )
     logger.info("  LLM service ready (%s)", settings.llm_model_name)
 
-    tts = PiperTTSService(
-        voice_id=settings.piper_voice,
-        download_dir=settings.piper_model_dir,
+    tts = CartesiaTTSService(
+        api_key=settings.cartesia_api_key,
+        voice_id=settings.cartesia_voice_id,
+        model=settings.cartesia_model,
         sample_rate=settings.audio_sample_rate,
+        params=CartesiaTTSService.InputParams(language=Language.ES),
     )
-    logger.info("  Piper TTS ready (%s)", settings.piper_voice)
+    logger.info(
+        "  Cartesia TTS ready (%s, voice %s)",
+        settings.cartesia_model,
+        settings.cartesia_voice_id or "<unset>",
+    )
 
     return Services(stt=stt, llm=llm, tts=tts)
 

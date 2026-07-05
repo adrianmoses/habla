@@ -511,6 +511,23 @@ wheels = [
 ]
 
 [[package]]
+name = "cartesia"
+version = "3.3.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyio" },
+    { name = "distro" },
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "sniffio" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b0/d4/5fdb4443af54be86c6d228ae6bbbd23195778495753662cb8eba7ac9a8d1/cartesia-3.3.0.tar.gz", hash = "sha256:78f2d7f3dd1d91b55b0fae4914a15dec23a6048bfc6b4034bb93ea8e6e4b6f85", size = 334032, upload-time = "2026-07-01T17:28:54.23Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ec/7d/cb410077795eaccddb6116eb9fc1cd72e102b63b38a566914c2f4d859fba/cartesia-3.3.0-py3-none-any.whl", hash = "sha256:cf73a0972826808e2e17513617fc8619586cfc20977d15d3644e19a14c86e5fd", size = 210700, upload-time = "2026-07-01T17:28:52.981Z" },
+]
+
+[[package]]
 name = "catalogue"
 version = "2.0.10"
 source = { registry = "https://pypi.org/simple" }
@@ -1282,6 +1299,7 @@ source = { editable = "." }
 dependencies = [
     { name = "alembic" },
     { name = "asyncpg" },
+    { name = "cartesia" },
     { name = "fastapi" },
     { name = "faster-whisper" },
     { name = "jupyterlab" },
@@ -1337,6 +1355,7 @@ requires-dist = [
     { name = "anthropic", marker = "extra == 'eval'", specifier = ">=0.40.0" },
     { name = "anthropic", marker = "extra == 'finetune'", specifier = ">=0.40.0" },
     { name = "asyncpg", specifier = ">=0.30.0" },
+    { name = "cartesia", specifier = ">=3.3.0" },
     { name = "datasets", marker = "extra == 'finetune'", specifier = ">=3.0.0" },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "faster-whisper", specifier = ">=1.0.0" },
