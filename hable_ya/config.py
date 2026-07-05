@@ -1,7 +1,14 @@
 from pathlib import Path
 
+from dotenv import load_dotenv
 from pydantic import Field
 from pydantic_settings import BaseSettings
+
+# Dev convenience: populate os.environ from a .env in the working directory
+# before Settings is constructed. override=False so an exported var or a
+# container-injected value always wins over .env. Feeds the validation_alias
+# fields below (ANTHROPIC/OPENAI/CARTESIA keys) and anything reading os.environ.
+load_dotenv()
 
 
 class Settings(BaseSettings):

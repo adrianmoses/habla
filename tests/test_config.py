@@ -60,3 +60,29 @@ def test_stt_tts_keys_read_standard_env(monkeypatch) -> None:
     assert s.openai_api_key == "sk-openai-xyz"
     assert s.cartesia_api_key == "cart-xyz"
     assert s.cartesia_voice_id == "voice-xyz"
+
+
+# ---- spec 009: .env loading via python-dotenv -----------------------------
+
+
+def test_dotenv_populates_settings(tmp_path, monkeypatch) -> None:
+    from dotenv import load_dotenv
+
+    # config.py calls load_dotenv() at import; isolate by clearing the var,
+    # then load a temp .env and confirm it reaches Settings.
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    env = tmp_path / ".env"
+    env.write_text("OPENAI_API_KEY=sk-from-dotenv\n")
+    load_dotenv(dotenv_path=env, override=False)
+    assert Settings().openai_api_key == "sk-from-dotenv"
+
+
+def test_exported_env_wins_over_dotenv(tmp_path, monkeypatch) -> None:
+    from dotenv import load_dotenv
+
+    # override=False: an already-set env var is authoritative over .env.
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-exported")
+    env = tmp_path / ".env"
+    env.write_text("OPENAI_API_KEY=sk-from-dotenv\n")
+    load_dotenv(dotenv_path=env, override=False)
+    assert Settings().openai_api_key == "sk-exported"
