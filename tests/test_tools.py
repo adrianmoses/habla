@@ -4,8 +4,14 @@ from __future__ import annotations
 
 import pytest
 from jsonschema import Draft202012Validator
+from pipecat.adapters.services.anthropic_adapter import AnthropicLLMAdapter
 
-from hable_ya.tools.schema import HABLE_YA_TOOLS
+from hable_ya.tools.schema import (
+    HABLE_YA_TOOLS,
+    HABLE_YA_TOOLS_SCHEMA,
+    LOG_TURN_PROPERTIES,
+    LOG_TURN_REQUIRED,
+)
 
 
 def _log_turn_schema() -> dict[str, object]:
@@ -126,3 +132,17 @@ def test_schema_rejects_malformed_args(
     validator = Draft202012Validator(schema)
     errors = list(validator.iter_errors(bad_payload))
     assert errors, f"expected schema to reject {reason!r}"
+
+
+def test_native_tools_schema_converts_for_anthropic() -> None:
+    """The Pipecat FunctionSchema the runtime registers (spec 001) converts to
+    a valid Anthropic tool dict whose shape matches the canonical payload."""
+    tools = AnthropicLLMAdapter().from_standard_tools(HABLE_YA_TOOLS_SCHEMA)
+    assert len(tools) == 1
+    tool = tools[0]
+    assert tool["name"] == "log_turn"
+    assert isinstance(tool["description"], str) and tool["description"]
+    input_schema = tool["input_schema"]
+    assert set(input_schema["required"]) == set(LOG_TURN_REQUIRED)
+    assert set(input_schema["properties"]) == set(LOG_TURN_PROPERTIES)
+    assert "cefr_band" in input_schema["properties"]

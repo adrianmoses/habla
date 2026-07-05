@@ -18,7 +18,7 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.frame_processor import FrameProcessor
 
 from hable_ya.config import Settings
-from hable_ya.pipeline.processors.tool_handler import HableYaToolHandler
+from hable_ya.pipeline.processors.log_turn_observer import LogTurnEmissionObserver
 from hable_ya.pipeline.processors.turn_observer import HableYaTurnObserver
 from hable_ya.pipeline.runner import build_pipeline
 from hable_ya.pipeline.services import Services
@@ -70,7 +70,6 @@ def test_build_pipeline_returns_pipeline(
         context,
         Settings(),
         sink=_sink(tmp_path),
-        session_id="test",
     )
     assert isinstance(pipeline, Pipeline)
 
@@ -81,9 +80,10 @@ def test_pipeline_processor_order(
     """The documented topology is:
 
         transport.input → stt → turn_observer → aggregators.user →
-        llm → tool_handler → tts → transport.output → aggregators.assistant
+        llm → emission_observer → tts → transport.output → aggregators.assistant
 
-    The tool handler MUST come after the LLM and strictly before the TTS.
+    The log_turn emission observer MUST come after the LLM (so it sees the
+    response frames) and before the TTS.
     """
     context = LLMContext(messages=[{"role": "system", "content": "s"}])
     pipeline = build_pipeline(
@@ -92,7 +92,6 @@ def test_pipeline_processor_order(
         context,
         Settings(),
         sink=_sink(tmp_path),
-        session_id="test",
     )
 
     processors = list(pipeline.processors)
@@ -109,12 +108,12 @@ def test_pipeline_processor_order(
     stt_idx = idx_of(lambda p: p is fake_services.stt)
     llm_idx = idx_of(lambda p: p is fake_services.llm)
     tts_idx = idx_of(lambda p: p is fake_services.tts)
-    tool_idx = idx_of(lambda p: isinstance(p, HableYaToolHandler))
+    emit_idx = idx_of(lambda p: isinstance(p, LogTurnEmissionObserver))
     obs_idx = idx_of(lambda p: isinstance(p, HableYaTurnObserver))
 
     assert stt_idx < obs_idx < llm_idx, "turn observer must sit between STT and LLM"
-    assert llm_idx < tool_idx < tts_idx, (
-        "tool handler must sit strictly between LLM and TTS"
+    assert llm_idx < emit_idx < tts_idx, (
+        "emission observer must sit between LLM and TTS"
     )
 
 
@@ -129,7 +128,6 @@ def test_custom_processors_are_fresh_per_pipeline(
         context,
         Settings(),
         sink=_sink(tmp_path),
-        session_id="test",
     )
     p2 = build_pipeline(
         fake_services,
@@ -137,11 +135,10 @@ def test_custom_processors_are_fresh_per_pipeline(
         context,
         Settings(),
         sink=_sink(tmp_path),
-        session_id="test",
     )
 
-    handlers_1 = [p for p in p1.processors if isinstance(p, HableYaToolHandler)]
-    handlers_2 = [p for p in p2.processors if isinstance(p, HableYaToolHandler)]
+    obs_1 = [p for p in p1.processors if isinstance(p, LogTurnEmissionObserver)]
+    obs_2 = [p for p in p2.processors if isinstance(p, LogTurnEmissionObserver)]
 
-    assert handlers_1 and handlers_2
-    assert handlers_1[0] is not handlers_2[0]
+    assert obs_1 and obs_2
+    assert obs_1[0] is not obs_2[0]

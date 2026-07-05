@@ -31,8 +31,7 @@ from pipecat.turns.user_stop import TurnAnalyzerUserTurnStopStrategy
 from pipecat.turns.user_turn_strategies import UserTurnStrategies
 
 from hable_ya.config import Settings
-from hable_ya.learner.ingest import TurnIngestService
-from hable_ya.pipeline.processors.tool_handler import HableYaToolHandler
+from hable_ya.pipeline.processors.log_turn_observer import LogTurnEmissionObserver
 from hable_ya.pipeline.processors.turn_observer import HableYaTurnObserver
 from hable_ya.pipeline.services import Services
 from hable_ya.runtime.observations import TurnObservationSink
@@ -52,13 +51,13 @@ def build_pipeline(
     settings: Settings,
     *,
     sink: TurnObservationSink,
-    session_id: str,
-    ingest: TurnIngestService | None = None,
 ) -> Pipeline:
     """Assemble the voice pipeline.
 
-    Order is load-bearing: the tool handler sits immediately before TTS so
-    `log_turn(...)` syntax never reaches speech synthesis.
+    Claude emits `log_turn` as a native tool call, dispatched by the handler
+    registered in the session route — not parsed from the text stream. The
+    only per-session processor left here is the emission observer, which counts
+    turns that produced no `log_turn` call (`sink.missing`).
     """
     smart_turn = LocalSmartTurnAnalyzerV3(
         params=SmartTurnParams(stop_secs=settings.smart_turn_stop_secs)
@@ -75,7 +74,7 @@ def build_pipeline(
     aggregators = LLMContextAggregatorPair(context, user_params=user_params)
 
     turn_observer = HableYaTurnObserver()
-    tool_handler = HableYaToolHandler(sink, session_id, ingest=ingest)
+    emission_observer = LogTurnEmissionObserver(sink)
 
     return Pipeline(
         [
@@ -84,7 +83,7 @@ def build_pipeline(
             turn_observer,
             aggregators.user(),
             services.llm,
-            tool_handler,
+            emission_observer,
             services.tts,
             transport.output(),
             aggregators.assistant(),
@@ -99,8 +98,6 @@ def build_pipeline_task(
     settings: Settings,
     *,
     sink: TurnObservationSink,
-    session_id: str,
-    ingest: TurnIngestService | None = None,
 ) -> PipelineTask:
     pipeline = build_pipeline(
         services,
@@ -108,8 +105,6 @@ def build_pipeline_task(
         context,
         settings,
         sink=sink,
-        session_id=session_id,
-        ingest=ingest,
     )
 
     observers: list[BaseObserver] | None = None

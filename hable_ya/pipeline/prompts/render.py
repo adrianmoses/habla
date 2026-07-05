@@ -192,15 +192,86 @@ def band_from_production_level(level: float) -> CEFRBand:
     return bucket_band(level)
 
 
+def _native_log_turn_lines() -> list[str]:
+    """log_turn instruction for native tool-calling (spec 001 runtime).
+
+    The model calls `log_turn` as a real tool; per-argument descriptions live
+    in the tool schema, so the prompt only needs the call-once instruction.
+    """
+    return [
+        "## After your reply, call log_turn",
+        "After your Spanish reply, call the `log_turn` tool exactly once to "
+        "record a structured observation of the learner's last turn. The "
+        "tool's parameters describe each field; base `cefr_band` on the "
+        "rubric above.",
+    ]
+
+
+def _text_log_turn_lines(
+    learner_ex: str, assistant_ex: str, band: CEFRBand
+) -> list[str]:
+    """log_turn instruction for plain-text emission (fine-tune / eval).
+
+    The pre-cloud contract: the model writes `log_turn(...)` as text after its
+    reply. Retained for the fine-tune and eval workstreams (`tool_mode="text"`,
+    the default) so their prompts stay byte-identical.
+    """
+    return [
+        "## After your reply, call log_turn",
+        "After your Spanish reply, emit the tool call on its own line in "
+        "this EXACT format — no code fences, no other wrappers:",
+        "",
+        'log_turn({"learner_utterance": "...", "errors": [...], '
+        '"fluency_signal": "...", "L1_used": ..., "cefr_band": "..."})',
+        "",
+        "Use that exact function-call shape: the literal name `log_turn`, "
+        "an opening paren, a single JSON object, a closing paren. Do not "
+        "wrap it in code fences or add `<tool_call>` tags.",
+        "",
+        "Arguments (all required):",
+        "- learner_utterance: the learner's last message copied VERBATIM.",
+        "- errors: list of {type, produced, target} objects. "
+        '"type" is the error category (e.g. "ser_estar"); '
+        '"produced" is the wrong form the learner used; '
+        '"target" is the corrected form you wove into your reply. '
+        "Use [] if there were no errors.",
+        '- fluency_signal: "weak", "moderate", or "strong" — based on the '
+        "learner's last message (hesitations, fragments, short utterances → "
+        "weak; complete sentences with some errors → moderate; fluent and "
+        "extended → strong).",
+        "- L1_used: true if the learner's last message contained any "
+        "English word, otherwise false.",
+        '- cefr_band: "A1", "A2", "B1", "B2", or "C1" — your read of the '
+        "learner's last utterance against the rubric above. Base on "
+        "production characteristics, not topic.",
+        "",
+        "### Full-turn example",
+        f'Learner: "{learner_ex}"',
+        "You:",
+        assistant_ex,
+        'log_turn({"learner_utterance": "'
+        + learner_ex
+        + '", "errors": [], "fluency_signal": "moderate", '
+        f'"L1_used": false, "cefr_band": "{band}"}})',
+    ]
+
+
 def render_system_prompt(
     params: SystemParams,
     band: CEFRBand | None = None,
+    *,
+    tool_mode: str = "text",
 ) -> str:
     """Build the runtime/fine-tune system prompt from fixture system_params.
 
     ``band`` overrides the production-level-derived band. Pass
     ``fixture.metadata.cefr_band`` when available so the prompt's register
     guidance matches what the scorer actually grades against.
+
+    ``tool_mode`` selects the log_turn instruction: ``"text"`` (default) keeps
+    the plain-text emission contract used by the fine-tune and eval
+    workstreams; ``"native"`` is the cloud runtime, where ``log_turn`` is a
+    real tool call and the per-argument details live in the tool schema.
     """
     p = params.profile
     t = params.theme
@@ -273,43 +344,12 @@ def render_system_prompt(
             f'Learner: "{learner_ex}"',
             f'You: "{assistant_ex}"',
             "",
-            "## After your reply, call log_turn",
-            "After your Spanish reply, emit the tool call on its own line in "
-            "this EXACT format — no code fences, no other wrappers:",
-            "",
-            'log_turn({"learner_utterance": "...", "errors": [...], '
-            '"fluency_signal": "...", "L1_used": ..., "cefr_band": "..."})',
-            "",
-            "Use that exact function-call shape: the literal name `log_turn`, "
-            "an opening paren, a single JSON object, a closing paren. Do not "
-            "wrap it in code fences or add `<tool_call>` tags.",
-            "",
-            "Arguments (all required):",
-            "- learner_utterance: the learner's last message copied VERBATIM.",
-            "- errors: list of {type, produced, target} objects. "
-            '"type" is the error category (e.g. "ser_estar"); '
-            '"produced" is the wrong form the learner used; '
-            '"target" is the corrected form you wove into your reply. '
-            "Use [] if there were no errors.",
-            '- fluency_signal: "weak", "moderate", or "strong" — based on the '
-            "learner's last message (hesitations, fragments, short utterances → "
-            "weak; complete sentences with some errors → moderate; fluent and "
-            "extended → strong).",
-            "- L1_used: true if the learner's last message contained any "
-            "English word, otherwise false.",
-            '- cefr_band: "A1", "A2", "B1", "B2", or "C1" — your read of the '
-            "learner's last utterance against the rubric above. Base on "
-            "production characteristics, not topic.",
-            "",
-            "### Full-turn example",
-            f'Learner: "{learner_ex}"',
-            "You:",
-            assistant_ex,
-            'log_turn({"learner_utterance": "'
-            + learner_ex
-            + '", "errors": [], "fluency_signal": "moderate", '
-            f'"L1_used": false, "cefr_band": "{band}"}})',
         ]
+    )
+    lines.extend(
+        _native_log_turn_lines()
+        if tool_mode == "native"
+        else _text_log_turn_lines(learner_ex, assistant_ex, band)
     )
 
     return "\n".join(lines)

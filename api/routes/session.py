@@ -23,9 +23,11 @@ from pipecat.transports.websocket.fastapi import (
     FastAPIWebsocketTransport,
 )
 
+from hable_ya.pipeline.log_turn_handler import make_log_turn_handler
 from hable_ya.pipeline.prompts.builder import build_session_prompt
 from hable_ya.pipeline.runner import build_pipeline_task, default_learner
 from hable_ya.pipeline.serializer import RawPCMSerializer
+from hable_ya.tools.schema import HABLE_YA_TOOLS_SCHEMA, LOG_TURN_NAME
 
 logger = logging.getLogger("hable_ya.api.session")
 router = APIRouter()
@@ -62,15 +64,21 @@ async def session_ws(websocket: WebSocket) -> None:
     learner = default_learner(settings)
     # Resolve recent_domains from `sessions` (empty on first run); build the
     # system prompt against the live profile + cooldown-aware theme choice.
-    # The fine-tuned Gemma is trained to emit plain-text `log_turn(...)` on its
-    # own; HABLE_YA_TOOLS is not injected into the LLM — see
-    # hable_ya/tools/schema.py for the documented payload shape.
     recent_domains = await _query_recent_theme_domains(pool) if pool is not None else []
     session_prompt = await build_session_prompt(
         learner, pool=pool, recent_domains=recent_domains
     )
+    # Register `log_turn` with the model (native tool-calling) and attach the
+    # per-session handler to the shared LLM service. tool_choice is left unset,
+    # which Anthropic treats as `auto`: the model both speaks and calls the tool
+    # in one turn. Re-registering each session overwrites the prior closure —
+    # safe under single-tenant (one active session at a time).
     context = LLMContext(
         messages=[{"role": "system", "content": session_prompt.text}],
+        tools=HABLE_YA_TOOLS_SCHEMA,
+    )
+    services.llm.register_function(
+        LOG_TURN_NAME, make_log_turn_handler(sink, session_id, ingest=ingest)
     )
 
     transport = FastAPIWebsocketTransport(
@@ -92,8 +100,6 @@ async def session_ws(websocket: WebSocket) -> None:
         context,
         settings,
         sink=sink,
-        session_id=session_id,
-        ingest=ingest,
     )
 
     if ingest is not None:

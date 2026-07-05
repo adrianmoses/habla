@@ -57,7 +57,7 @@ def render_cold_start_prompt(band: CEFRBand) -> str:
     appended ``COLD_START_INSTRUCTIONS`` block.
     """
     params = SystemParams(profile=_neutral_profile(band), theme=_NEUTRAL_THEME)
-    rendered = render_system_prompt(params, band=band)
+    rendered = render_system_prompt(params, band=band, tool_mode="native")
     return f"{rendered}\n\n## Primera sesión\n{COLD_START_INSTRUCTIONS}"
 
 
@@ -99,7 +99,7 @@ async def build_session_prompt(
         )
 
     params = SystemParams(profile=profile, theme=theme)
-    rendered = render_system_prompt(params, band=band)
+    rendered = render_system_prompt(params, band=band, tool_mode="native")
     if opt_in_cold_start:
         rendered = f"{rendered}\n\n## Primera sesión\n{COLD_START_INSTRUCTIONS}"
     return SessionPrompt(text=rendered, theme=theme, band=band)

@@ -43,12 +43,17 @@ def _expected_params(band: CEFRBand) -> SystemParams:
 
 @pytest.mark.parametrize("band", BANDS)
 async def test_builder_matches_render_for_band(band: CEFRBand) -> None:
-    expected = render_system_prompt(_expected_params(band), band=band)
+    # The runtime builder renders in native tool-calling mode (spec 001).
+    expected = render_system_prompt(
+        _expected_params(band), band=band, tool_mode="native"
+    )
     assert await build_system_prompt({"band": band}) == expected
 
 
 async def test_builder_defaults_to_a2() -> None:
-    expected = render_system_prompt(_expected_params("A2"), band="A2")
+    expected = render_system_prompt(
+        _expected_params("A2"), band="A2", tool_mode="native"
+    )
     assert await build_system_prompt({}) == expected
 
 
@@ -58,13 +63,28 @@ async def test_prompt_is_non_empty_and_about_spanish() -> None:
     assert "Spanish" in prompt
 
 
-async def test_prompt_contains_canonical_log_turn_example() -> None:
+async def test_native_prompt_asks_to_call_tool_not_emit_text() -> None:
+    # Spec 001: the runtime prompt tells the model to CALL the log_turn tool;
+    # the plain-text emission contract (and its per-argument descriptions) move
+    # into the tool schema.
     prompt = await build_system_prompt({"band": "A2"})
-    # Spec 049: the canonical example now includes cefr_band.
+    assert "call the `log_turn` tool exactly once" in prompt
+    assert (
+        'log_turn({"learner_utterance": "...", "errors": [...], '
+        '"fluency_signal": "...", "L1_used": ..., "cefr_band": "..."})'
+    ) not in prompt
+    assert "Arguments (all required):" not in prompt
+
+
+def test_text_mode_keeps_plain_text_example() -> None:
+    # The fine-tune / eval workstreams stay on the plain-text contract
+    # (tool_mode="text", the default) — byte-for-byte unchanged.
+    prompt = render_system_prompt(_expected_params("A2"), band="A2")
     assert (
         'log_turn({"learner_utterance": "...", "errors": [...], '
         '"fluency_signal": "...", "L1_used": ..., "cefr_band": "..."})'
     ) in prompt
+    assert "Arguments (all required):" in prompt
 
 
 async def test_prompt_lists_forbidden_phrases() -> None:
@@ -157,7 +177,7 @@ async def test_pool_with_zero_sessions_renders_neutral(
         ),
         theme=_NEUTRAL_THEME,
     )
-    expected = render_system_prompt(params, band="B1")
+    expected = render_system_prompt(params, band="B1", tool_mode="native")
     # The cold-start opt-in also appends guidance once sessions_completed == 0
     # and pool is provided — this is the "first session" behavior.
     assert prompt.startswith(expected)
@@ -220,9 +240,12 @@ async def test_prompt_contains_assessing_section_header() -> None:
     assert "## Assessing the learner's level" in prompt
 
 
-async def test_prompt_documents_cefr_band_argument() -> None:
+async def test_prompt_references_cefr_band_in_rubric() -> None:
+    # In native mode the per-argument descriptions live in the tool schema, but
+    # the assessing-the-level rubric still tells the model to emit its cefr_band
+    # read on every turn.
     prompt = await build_system_prompt({"band": "A2"})
-    assert "- cefr_band:" in prompt
+    assert "cefr_band" in prompt
 
 
 def test_cold_start_instructions_walk_the_four_step_ladder() -> None:

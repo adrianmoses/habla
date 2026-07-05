@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings
 
 
@@ -19,9 +20,13 @@ class Settings(BaseSettings):
     port: int = 8000
     log_level: str = "info"
 
-    llama_cpp_url: str = "http://localhost:8080"
-    llm_model_name: str = "gemma-4-e4b-finetuned"
-    llm_max_tokens: int = 150
+    # Claude via the Anthropic API (spec 001). The key is read from the
+    # standard ANTHROPIC_API_KEY env var (not the HABLE_YA_ prefix), matching
+    # the Anthropic SDK and the eval workstream.
+    anthropic_api_key: str = Field(default="", validation_alias="ANTHROPIC_API_KEY")
+    llm_model_name: str = "claude-sonnet-4-6"
+    # Room for a short spoken reply plus the native log_turn tool-call args.
+    llm_max_tokens: int = 1024
 
     whisper_model: str = "medium"
     whisper_device: str = "cuda"

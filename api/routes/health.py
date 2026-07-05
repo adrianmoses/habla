@@ -10,7 +10,7 @@ async def health(request: Request) -> JSONResponse:
     if not request.app.state.ready:
         return JSONResponse(
             status_code=503,
-            content={"status": "warming_up", "llm_backend": settings.llama_cpp_url},
+            content={"status": "warming_up", "llm_backend": settings.llm_model_name},
         )
     db = getattr(request.app.state, "db", None)
     if db is None or not await db.ping():
@@ -18,7 +18,9 @@ async def health(request: Request) -> JSONResponse:
             status_code=503,
             content={
                 "status": "db_unreachable",
-                "llm_backend": settings.llama_cpp_url,
+                "llm_backend": settings.llm_model_name,
             },
         )
-    return JSONResponse(content={"status": "ok", "llm_backend": settings.llama_cpp_url})
+    return JSONResponse(
+        content={"status": "ok", "llm_backend": settings.llm_model_name}
+    )
