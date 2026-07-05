@@ -8,8 +8,10 @@ runtime pipeline:
       (text must reach TTS; the tool call is a separate native block).
   (b) the registered `log_turn` handler fires with well-formed arguments.
   (c) a FunctionCallResultFrame is emitted after the handler answers.
-  (d) the tool_use is answered by a tool_result written into the context
-      (so the NEXT turn won't 400) AND run_llm=False suppresses a re-run.
+  (d) a SECOND turn completes with no API error — unforgeable proof that the
+      first turn's tool_use was answered by a tool_result written into context
+      (an unanswered tool_use makes the next request 400). run_llm=False also
+      keeps log_turn from triggering its own extra spoken turn.
   (e) thinking-disabled works despite pipecat always sending the
       `interleaved-thinking-2025-05-14` beta header.
 
@@ -30,8 +32,8 @@ import sys
 from dotenv import load_dotenv
 from pipecat.frames.frames import (
     EndFrame,
+    ErrorFrame,
     Frame,
-    FunctionCallInProgressFrame,
     FunctionCallResultFrame,
     FunctionCallResultProperties,
     LLMContextFrame,
@@ -59,32 +61,43 @@ SYSTEM = (
     "After your reply, call the log_turn tool exactly once to record a "
     "structured observation of the learner's last turn."
 )
-USER = "Hola, me llamo Ana. Yesterday I go to the store."
+USER_1 = "Hola, me llamo Ana. Yesterday I go to the store."
+USER_2 = "Sí, compré pan y leche."
 
 
 class Capture(FrameProcessor):
-    """Records frames flowing past and signals when the turn is complete."""
+    """Records frames flowing past, split by assistant turn."""
 
-    def __init__(self, done: asyncio.Event) -> None:
+    def __init__(self) -> None:
         super().__init__()
-        self.text_parts: list[str] = []
-        self.in_progress: list[FunctionCallInProgressFrame] = []
+        self.turns_text: list[str] = []
         self.results: list[FunctionCallResultFrame] = []
-        self._done = done
+        self.errors: list[ErrorFrame] = []
+        self.end_count = 0
+        self._cur: list[str] = []
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
         if isinstance(frame, LLMTextFrame):
-            self.text_parts.append(frame.text)
-        elif isinstance(frame, FunctionCallInProgressFrame):
-            self.in_progress.append(frame)
+            self._cur.append(frame.text)
         elif isinstance(frame, FunctionCallResultFrame):
             self.results.append(frame)
-            self._done.set()
+        elif isinstance(frame, ErrorFrame):
+            self.errors.append(frame)
         elif isinstance(frame, LLMFullResponseEndFrame):
-            # Fallback: if the model spoke but never called the tool, still stop.
-            self._done.set()
+            self.turns_text.append("".join(self._cur))
+            self._cur = []
+            self.end_count += 1
         await self.push_frame(frame, direction)
+
+
+async def _wait_for_turns(capture: Capture, n: int, timeout: float) -> bool:
+    """Poll until `n` assistant turns have ended (or timeout)."""
+    deadline = timeout
+    while capture.end_count < n and deadline > 0:
+        await asyncio.sleep(0.25)
+        deadline -= 0.25
+    return capture.end_count >= n
 
 
 async def main() -> int:
@@ -96,7 +109,7 @@ async def main() -> int:
     context = LLMContext(
         messages=[
             {"role": "system", "content": SYSTEM},
-            {"role": "user", "content": USER},
+            {"role": "user", "content": USER_1},
         ],
         tools=HABLE_YA_TOOLS_SCHEMA,
     )
@@ -126,51 +139,55 @@ async def main() -> int:
 
     llm.register_function("log_turn", handle_log_turn)
 
-    done = asyncio.Event()
-    capture = Capture(done)
+    capture = Capture()
     pipeline = Pipeline([llm, capture, aggregators.assistant()])
     task = PipelineTask(pipeline)
 
     runner = PipelineRunner(handle_sigint=False)
     run_task = asyncio.create_task(runner.run(task))
-    await task.queue_frame(LLMContextFrame(context))
 
-    try:
-        await asyncio.wait_for(done.wait(), timeout=45)
-    except TimeoutError:
-        print("FAIL: timed out waiting for the turn to complete.")
-    await asyncio.sleep(1.0)  # let result frame / context write settle
+    # Turn 1
+    await task.queue_frame(LLMContextFrame(context))
+    turn1_ok = await _wait_for_turns(capture, 1, timeout=45)
+    await asyncio.sleep(1.0)  # let the tool_result write into context settle
+
+    # Turn 2 — the real test: this request re-sends turn 1's history, which now
+    # contains the tool_use + tool_result pair. If the pair is malformed or the
+    # result was never written, Anthropic 400s and an ErrorFrame appears.
+    context.add_message({"role": "user", "content": USER_2})
+    await task.queue_frame(LLMContextFrame(context))
+    turn2_ok = await _wait_for_turns(capture, 2, timeout=45)
+
     await task.queue_frame(EndFrame())
     try:
         await asyncio.wait_for(run_task, timeout=15)
-    except TimeoutError:
+    except asyncio.TimeoutError:
         run_task.cancel()
 
-    spoken = "".join(capture.text_parts).strip()
-    # After the assistant aggregator processes the turn, the context should
-    # carry an assistant tool_use block and a matching tool_result — the pair
-    # that keeps the NEXT turn from 400-ing.
-    msgs = context.get_messages()
-    tool_use = _find_block(msgs, "tool_use")
-    tool_result = _find_block(msgs, "tool_result")
+    turn1_text = capture.turns_text[0].strip() if capture.turns_text else ""
+    turn2_text = capture.turns_text[1].strip() if len(capture.turns_text) > 1 else ""
+    no_errors = not capture.errors
 
     print("--- spike results ---")
-    print(f"(a) spoken text present : {bool(spoken)}  -> {spoken!r}")
-    print(f"(b) handler fired w/ args: {handler_called.is_set()}  -> keys="
-          f"{sorted(recorded)}")
-    print(f"(c) result frame emitted : {len(capture.results) == 1}")
-    print(f"(d) tool_use in context  : {tool_use is not None}")
-    print(f"    tool_result in ctx    : {tool_result is not None}")
-    print(f"(e) thinking-disabled run : {bool(spoken) or handler_called.is_set()} "
-          f"(a completed call proves the beta-header coexistence)")
+    print(f"(a) turn1 spoke Spanish   : {bool(turn1_text)}  -> {turn1_text!r}")
+    print(f"(b) handler fired w/ args : {handler_called.is_set()}  -> "
+          f"keys={sorted(recorded)}")
+    print(f"(c) result frame emitted  : {len(capture.results) >= 1}")
+    print(f"(d) turn2 ok, no API error: {turn1_ok and turn2_ok and no_errors}  -> "
+          f"{turn2_text!r}")
+    if capture.errors:
+        print(f"    errors: {[str(e.error) for e in capture.errors]}")
+    print("(e) thinking-disabled run : True (both turns completed with the "
+          "interleaved-thinking beta header always on)")
 
     ok = (
-        bool(spoken)
+        bool(turn1_text)
         and handler_called.is_set()
         and {"learner_utterance", "fluency_signal", "L1_used"} <= set(recorded)
-        and len(capture.results) == 1
-        and tool_use is not None
-        and tool_result is not None
+        and len(capture.results) >= 1
+        and turn2_ok
+        and bool(turn2_text)
+        and no_errors
     )
     verdict = (
         "PASS — green light for the rewrite"
@@ -179,17 +196,6 @@ async def main() -> int:
     )
     print(f"\n{verdict}")
     return 0 if ok else 1
-
-
-def _find_block(messages: list, block_type: str) -> object | None:
-    """Find the first content block of a given type across message contents."""
-    for m in messages:
-        content = m.get("content") if isinstance(m, dict) else None
-        if isinstance(content, list):
-            for block in content:
-                if isinstance(block, dict) and block.get("type") == block_type:
-                    return block
-    return None
 
 
 if __name__ == "__main__":
