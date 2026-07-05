@@ -1,38 +1,33 @@
 """FastAPI app for hable-ya.
 
 Loads the shared Pipecat services (STT / LLM / TTS) once during lifespan and
-pings the llama.cpp backend until it is ready before flipping
-`app.state.ready = True`. The `cuda_bootstrap` call runs before any pipecat
-imports so CUDA-linked libs resolve correctly (see hable_ya/cuda_bootstrap.py).
+confirms the Anthropic API is reachable before flipping
+`app.state.ready = True`. All three models are managed APIs (Claude / OpenAI /
+Cartesia), so the app runs CPU-only — no CUDA bootstrap needed.
 """
 
 from __future__ import annotations
 
-# Must run before any pipecat/torch import — see hable_ya/cuda_bootstrap.py.
-from hable_ya.cuda_bootstrap import bootstrap_cuda
+import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
-bootstrap_cuda()
+from fastapi import FastAPI
 
-import logging  # noqa: E402
-from collections.abc import AsyncIterator  # noqa: E402
-from contextlib import asynccontextmanager  # noqa: E402
-
-from fastapi import FastAPI  # noqa: E402
-
-from api.routes.health import router as health_router  # noqa: E402
-from api.routes.session import router as session_router  # noqa: E402
-from hable_ya.config import settings  # noqa: E402
-from hable_ya.db import (  # noqa: E402
+from api.routes.health import router as health_router
+from api.routes.session import router as session_router
+from hable_ya.config import settings
+from hable_ya.db import (
     HableYaDB,
     close_pool,
     open_pool,
     upgrade_to_head,
 )
-from hable_ya.learner import graph as learner_graph  # noqa: E402
-from hable_ya.learner.ingest import TurnIngestService  # noqa: E402
-from hable_ya.learner.leveling import LevelingService  # noqa: E402
-from hable_ya.pipeline.services import load_services, warmup_llm  # noqa: E402
-from hable_ya.runtime.observations import TurnObservationSink  # noqa: E402
+from hable_ya.learner import graph as learner_graph
+from hable_ya.learner.ingest import TurnIngestService
+from hable_ya.learner.leveling import LevelingService
+from hable_ya.pipeline.services import load_services, warmup_llm
+from hable_ya.runtime.observations import TurnObservationSink
 
 logging.basicConfig(level=settings.log_level.upper())
 logger = logging.getLogger("hable_ya.api")
