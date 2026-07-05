@@ -24,7 +24,7 @@ from rich.progress import Progress
 
 from eval.fixtures.schema import ColdStartFixture, Fixture, load_fixtures
 from eval.scoring.turn import EvalOutput, TurnResult, score_turn
-from finetune.format import render_system_prompt
+from hable_ya.pipeline.prompts.render import render_system_prompt
 
 console = Console()
 

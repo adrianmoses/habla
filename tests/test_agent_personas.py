@@ -14,8 +14,8 @@ from eval.agent.personas.schema import (
     load_personas,
 )
 from eval.fixtures.schema import LearnerProfile, SystemParams, Theme
-from finetune.format import render_system_prompt
 from hable_ya.learner.profile import LearnerProfileSnapshot, snapshot_to_profile
+from hable_ya.pipeline.prompts.render import render_system_prompt
 
 PERSONAS_DIR = Path(__file__).resolve().parents[1] / "eval" / "agent" / "personas"
 
