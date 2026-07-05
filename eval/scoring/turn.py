@@ -267,7 +267,7 @@ class EvalOutput(BaseModel):
 
     run_id: str
     timestamp: str
-    base_url: str
+    model: str
     fixture_count: int
     cold_start_skipped: int
     results: list[TurnResult]

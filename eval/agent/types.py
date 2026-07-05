@@ -68,7 +68,6 @@ class AgentEvalOutput(BaseModel):
 
     run_id: str
     timestamp: str
-    base_url: str
     model_label: str
     session_count: int
     sessions: list[SessionRecord]
