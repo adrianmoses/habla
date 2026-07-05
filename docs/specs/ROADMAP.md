@@ -25,12 +25,12 @@ migration is scoped to the model boundary and its fallout.
 
 | ID | Feature | Status | Spec |
 |---|---|---|---|
-| 001 | Claude LLM via Pipecat `AnthropicLLMService`, replacing the llama.cpp `OpenAILLMService` (drop `base_url`/dummy `api_key`) | planned | — |
-| 002 | Register `HABLE_YA_TOOLS` with the LLM context + force emission with `tool_choice` — switch `log_turn` from plain-text contract to native structured tool-calling | planned | — |
-| 003 | Rework the tool handler to consume native function-call frames instead of buffering `LLMTextFrame`s and regex-parsing `log_turn(...)` / `[TOOL_CALL: log_turn]{...}` (reuse the existing `api_tool_calls` path in `parse_tool_calls`) | planned | — |
-| 004 | System prompt: move the `log_turn` emission instruction into the tool definition; remove the inline plain-text-emission contract the fine-tune baked in | planned | — |
-| 005 | Config: Anthropic model id + `ANTHROPIC_API_KEY`; remove `llama_cpp_url`, `llm_model_name`, and the Gemma `chat_template_kwargs.enable_thinking=false` hack | planned | — |
-| 006 | Replace the llama.cpp warmup ping-loop with a lightweight managed-API health check (or drop it) | planned | — |
+| 001 | Claude LLM (`claude-sonnet-4-6`) via Pipecat `AnthropicLLMService`, replacing the llama.cpp `OpenAILLMService` (drop `base_url`/dummy `api_key`) | in-progress | [001-cloud-llm-native-tools](001-cloud-llm-native-tools/spec.md) |
+| 002 | Register `HABLE_YA_TOOLS` with the LLM context and emit `log_turn` via native structured tool-calling with `tool_choice: auto` (forcing suppresses the spoken reply — see spec Key Decision 3) | in-progress | [001-cloud-llm-native-tools](001-cloud-llm-native-tools/spec.md) |
+| 003 | Rework the tool handler to consume native function-call frames instead of buffering `LLMTextFrame`s and regex-parsing `log_turn(...)` / `[TOOL_CALL: log_turn]{...}` (reuse the existing `api_tool_calls` path in `parse_tool_calls`) | in-progress | [001-cloud-llm-native-tools](001-cloud-llm-native-tools/spec.md) |
+| 004 | System prompt: move the `log_turn` emission instruction into the tool definition; remove the inline plain-text-emission contract the fine-tune baked in | in-progress | [001-cloud-llm-native-tools](001-cloud-llm-native-tools/spec.md) |
+| 005 | Config: Anthropic model id + `ANTHROPIC_API_KEY`; remove `llama_cpp_url`, `llm_model_name`, and the Gemma `chat_template_kwargs.enable_thinking=false` hack (disable thinking / low effort for voice latency) | in-progress | [001-cloud-llm-native-tools](001-cloud-llm-native-tools/spec.md) |
+| 006 | Replace the llama.cpp warmup ping-loop with a lightweight managed-API health check (or drop it) | in-progress | [001-cloud-llm-native-tools](001-cloud-llm-native-tools/spec.md) |
 | 007 | STT → OpenAI Whisper API (replace faster-whisper CUDA `medium`); Spanish language config | planned | — |
 | 008 | TTS → Cartesia (replace Piper `es_ES-davefx-medium`); select a Spanish voice | planned | — |
 | 009 | Deployment: delete the llama.cpp GPU compose service and drop all `nvidia` GPU reservations — app container becomes CPU-only (Postgres + AGE `db` service unchanged) | planned | — |
@@ -53,3 +53,4 @@ migration is scoped to the model boundary and its fallout.
 | Date | Change |
 |---|---|
 | 2026-07-05 | Initial cloud-fork roadmap: LLM → Claude, STT → OpenAI Whisper, TTS → Cartesia. Features #001–#015 derived from the hable-ya on-device → cloud-API migration analysis. |
+| 2026-07-05 | Spec 001-cloud-llm-native-tools drafted (bundles #001–#006: Claude Sonnet 4.6 via Pipecat Anthropic service, native `log_turn` tool-calling with `tool_choice: auto`, handler rework, prompt/tool-def move, config swap, warmup replacement); #001–#006 → in-progress. Corrects #002: `tool_choice` forcing suppresses the spoken reply, so emission is `auto` + prompt, not forced. Assumes a prerequisite #000 port of the hable-ya runtime into this repo. |
