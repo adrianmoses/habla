@@ -28,12 +28,17 @@ class Settings(BaseSettings):
     # Room for a short spoken reply plus the native log_turn tool-call args.
     llm_max_tokens: int = 1024
 
-    whisper_model: str = "medium"
-    whisper_device: str = "cuda"
-    whisper_compute_type: str = "float16"
+    # STT via the OpenAI transcription API (spec 007). Key read from the
+    # standard OPENAI_API_KEY. gpt-4o-transcribe is stronger on Spanish than
+    # whisper-1 (the axis the on-device faster-whisper was weakest on).
+    openai_api_key: str = Field(default="", validation_alias="OPENAI_API_KEY")
+    stt_model: str = "gpt-4o-transcribe"
 
-    piper_voice: str = "es_ES-davefx-medium"
-    piper_model_dir: Path = Path.home() / "piper_models"
+    # TTS via Cartesia (spec 007). voice_id is owner-supplied (no safe default;
+    # the runtime/smoke fail fast if unset).
+    cartesia_api_key: str = Field(default="", validation_alias="CARTESIA_API_KEY")
+    cartesia_voice_id: str = Field(default="", validation_alias="CARTESIA_VOICE_ID")
+    cartesia_model: str = "sonic-3"
 
     smart_turn_stop_secs: float = 4.0
     vad_stop_secs: float = 0.5

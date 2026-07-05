@@ -31,6 +31,7 @@ dependencies = [
     # (`python -m spacy download es_core_news_sm`); VocabularyRepo degrades
     # gracefully if the model isn't loadable.
     "spacy>=3.7",
+    "cartesia>=3.3.0",
 ]
 
 [project.optional-dependencies]

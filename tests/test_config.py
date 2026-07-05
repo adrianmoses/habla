@@ -1,6 +1,8 @@
-"""Config tests for the cloud LLM swap (spec 001)."""
+"""Config tests for the cloud model swaps (specs 001, 007)."""
 
 from __future__ import annotations
+
+import pytest
 
 from hable_ya.config import Settings
 
@@ -22,3 +24,39 @@ def test_anthropic_api_key_reads_standard_env(monkeypatch) -> None:
     # prefix used by the other settings.
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-123")
     assert Settings().anthropic_api_key == "sk-test-123"
+
+
+# ---- spec 007: cloud STT + TTS -------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "removed_field",
+    [
+        "whisper_model",
+        "whisper_device",
+        "whisper_compute_type",
+        "piper_voice",
+        "piper_model_dir",
+    ],
+)
+def test_local_stt_tts_fields_removed(removed_field: str) -> None:
+    assert not hasattr(Settings(), removed_field)
+
+
+def test_cloud_stt_tts_defaults() -> None:
+    s = Settings()
+    assert hasattr(s, "openai_api_key")
+    assert hasattr(s, "cartesia_api_key")
+    assert hasattr(s, "cartesia_voice_id")
+    assert s.stt_model == "gpt-4o-transcribe"
+    assert s.cartesia_model == "sonic-3"
+
+
+def test_stt_tts_keys_read_standard_env(monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-xyz")
+    monkeypatch.setenv("CARTESIA_API_KEY", "cart-xyz")
+    monkeypatch.setenv("CARTESIA_VOICE_ID", "voice-xyz")
+    s = Settings()
+    assert s.openai_api_key == "sk-openai-xyz"
+    assert s.cartesia_api_key == "cart-xyz"
+    assert s.cartesia_voice_id == "voice-xyz"
