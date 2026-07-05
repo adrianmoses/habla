@@ -1,0 +1,11 @@
+{
+  "id": "a1_ser_estar_cafeteria",
+  "cefr_band": "A1",
+  "scenario_domain": "pedir un café",
+  "error_patterns": ["ser_estar"],
+  "L1_reliance": 0.5,
+  "fluency_signal": "weak",
+  "turn_budget": 12,
+  "opening_utterance": "Hola... eh... un café, please.",
+  "notes": "A1 learner ordering at a café, mixing English and short Spanish. Repeats 'es' where 'está' belongs (location, temporary state). Tests basic ser/estar recasts at the lowest band."
+}

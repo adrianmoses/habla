@@ -1,0 +1,11 @@
+{
+  "id": "b2_idiomatic_dietas",
+  "cefr_band": "B2",
+  "scenario_domain": "debate sobre dietas y salud",
+  "error_patterns": ["idiomatic_error"],
+  "L1_reliance": 0.15,
+  "fluency_signal": "strong",
+  "turn_budget": 12,
+  "opening_utterance": "Pienso que la dieta mediterránea toma la torta cuando se trata de salud a largo plazo.",
+  "notes": "B2 in a health/diet discussion. Calques English idioms into Spanish ('toma la torta' for 'takes the cake', 'me cuesta una fortuna' used loosely, 'tener un punto' instead of 'tener razón en parte'). Tests natural recasting of idiomatic substitutions."
+}

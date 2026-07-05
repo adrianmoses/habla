@@ -1,0 +1,11 @@
+{
+  "id": "c1_register_slip_libro",
+  "cefr_band": "C1",
+  "scenario_domain": "libro o ensayo transformador",
+  "error_patterns": ["register_slip"],
+  "L1_reliance": 0.05,
+  "fluency_signal": "strong",
+  "turn_budget": 12,
+  "opening_utterance": "Sapiens de Harari me voló la cabeza — la forma en que reframea toda la historia humana es brutal.",
+  "notes": "C1 describing a transformative book. Capable of nuanced analysis but oscillates between intellectual register and very colloquial idioms ('me voló la cabeza', 'es brutal', 'me cambió el chip') within the same turn. Tests whether the agent stays at register without dragging the conversation up or down."
+}

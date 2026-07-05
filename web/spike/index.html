@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>hable ya · voice spike</title>
+<style>
+  :root {
+    --cream: #f5efe6;
+    --ink: #2a211a;
+    --muted: #7d6f62;
+    --clay: #c87454;
+    --line: rgba(42, 33, 26, 0.12);
+    --ok: #5a8a4a;
+    --warn: #c87454;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: var(--cream); color: var(--ink); font-family: ui-sans-serif, system-ui, sans-serif; }
+  body { padding: 32px; max-width: 780px; margin: 0 auto; }
+  h1 { font-size: 22px; font-weight: 500; margin-bottom: 4px; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 24px; }
+  .row { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; }
+  label { font-size: 12px; color: var(--muted); width: 90px; text-transform: uppercase; letter-spacing: 0.08em; }
+  input[type=text] { flex: 1; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; font-family: ui-monospace, monospace; font-size: 13px; background: white; }
+  button { padding: 10px 18px; border-radius: 100px; background: var(--ink); color: var(--cream); border: none; cursor: pointer; font-size: 14px; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  #status { font-size: 12px; font-family: ui-monospace, monospace; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: white; margin: 20px 0 16px; }
+  #status.ok { border-color: var(--ok); color: var(--ok); }
+  #status.warming, #status.warn { border-color: var(--warn); color: var(--warn); }
+  .meter-row { display: grid; grid-template-columns: 90px 1fr; gap: 10px; align-items: center; margin-bottom: 8px; }
+  .meter-label { font-size: 11px; color: var(--muted); font-family: ui-monospace, monospace; letter-spacing: 0.08em; text-transform: uppercase; }
+  .meter-track { height: 10px; background: rgba(42, 33, 26, 0.08); border-radius: 100px; overflow: hidden; }
+  .meter-fill { height: 100%; width: 0%; background: var(--clay); transition: width 40ms linear; }
+  #log { margin-top: 24px; height: 320px; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; padding: 12px; font-family: ui-monospace, monospace; font-size: 12px; background: white; line-height: 1.6; }
+  #log div { border-bottom: 1px solid rgba(42, 33, 26, 0.04); padding-bottom: 4px; margin-bottom: 4px; }
+</style>
+</head>
+<body>
+  <h1>voice-client spike</h1>
+  <div class="sub">Validates that Chromium can exchange raw 16 kHz mono PCM with <code>/ws/session</code> end-to-end. Mirrors <code>scripts/voice_client.py</code>.</div>
+
+  <div class="row">
+    <label for="healthUrl">Health</label>
+    <input id="healthUrl" type="text" />
+  </div>
+  <div class="row">
+    <label for="wsUrl">WebSocket</label>
+    <input id="wsUrl" type="text" />
+    <button id="startStop" disabled>Start session</button>
+  </div>
+
+  <div id="status">checking…</div>
+
+  <div class="meter-row">
+    <span class="meter-label">mic</span>
+    <div class="meter-track"><div id="micMeter" class="meter-fill"></div></div>
+  </div>
+  <div class="meter-row">
+    <span class="meter-label">agent</span>
+    <div class="meter-track"><div id="playbackMeter" class="meter-fill"></div></div>
+  </div>
+
+  <div id="log"></div>
+
+  <script src="spike.js" type="module"></script>
+</body>
+</html>

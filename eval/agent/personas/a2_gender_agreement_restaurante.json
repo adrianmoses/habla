@@ -1,0 +1,11 @@
+{
+  "id": "a2_gender_agreement_restaurante",
+  "cefr_band": "A2",
+  "scenario_domain": "en el restaurante",
+  "error_patterns": ["gender_agreement"],
+  "L1_reliance": 0.3,
+  "fluency_signal": "moderate",
+  "turn_budget": 12,
+  "opening_utterance": "Buenos días. Quiero una mesa para dos persona, por favor.",
+  "notes": "A2 learner at a restaurant. Reliable presente tense but consistently breaks gender/number agreement on adjectives and articles. Tests recasts that surface the corrected form without explicit metalinguistic correction."
+}

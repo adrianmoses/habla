@@ -1,0 +1,11 @@
+{
+  "id": "a2_ser_estar_planes",
+  "cefr_band": "A2",
+  "scenario_domain": "planes para el fin de semana",
+  "error_patterns": ["ser_estar"],
+  "L1_reliance": 0.3,
+  "fluency_signal": "moderate",
+  "turn_budget": 12,
+  "opening_utterance": "Este fin de semana yo soy en casa porque mi hermana es enferma.",
+  "notes": "A2 making weekend plans. Confidently produces presente tense but consistently picks 'ser' where 'estar' belongs (location, temporary state, ongoing condition). Distinct from A1 ser/estar in that the learner is otherwise fluent — the recast must be subtle."
+}

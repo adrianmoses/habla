@@ -1,0 +1,20 @@
+:root {
+  /* warm earthy palette */
+  --cream: #f5efe6;
+  --cream-2: #ece4d6;
+  --sand: #d9cdb8;
+  --sand-deep: #b8a585;
+  --clay: #c87454;
+  --clay-deep: #a8543a;
+  --terra: #d98a63;
+  --olive: #6b6b4a;
+  --ink: #2a211a;
+  --ink-2: #4a3d32;
+  --muted: #7d6f62;
+  --line: rgba(42, 33, 26, 0.12);
+  --line-strong: rgba(42, 33, 26, 0.24);
+
+  --serif: 'Instrument Serif', 'Iowan Old Style', Georgia, serif;
+  --sans: 'Geist', -apple-system, 'Helvetica Neue', sans-serif;
+  --mono: 'Geist Mono', 'SF Mono', Menlo, monospace;
+}

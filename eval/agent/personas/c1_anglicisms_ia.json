@@ -1,0 +1,11 @@
+{
+  "id": "c1_anglicisms_ia",
+  "cefr_band": "C1",
+  "scenario_domain": "IA en la sociedad",
+  "error_patterns": ["anglicisms", "idiomatic_error"],
+  "L1_reliance": 0.05,
+  "fluency_signal": "strong",
+  "turn_budget": 12,
+  "opening_utterance": "Honestamente, la IA va a disruptir todo — el job market, la educación, hasta cómo socializamos.",
+  "notes": "C1 discussing AI's social impact. Borrows English tech vocabulary directly ('disruptir', 'el job market', 'crashea'), and occasionally translates idioms verbatim ('al final del día' for 'at the end of the day'). Tests whether the agent supplies Spanish equivalents without flagging the loanwords as wrong."
+}

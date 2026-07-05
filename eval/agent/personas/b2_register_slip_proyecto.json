@@ -1,0 +1,11 @@
+{
+  "id": "b2_register_slip_proyecto",
+  "cefr_band": "B2",
+  "scenario_domain": "proyecto que lideraste",
+  "error_patterns": ["register_slip"],
+  "L1_reliance": 0.1,
+  "fluency_signal": "strong",
+  "turn_budget": 12,
+  "opening_utterance": "Lideré un proyecto súper guay el año pasado, fue una pasada total.",
+  "notes": "B2 describing a leadership experience in informal-leaning Spanish. Slips between formal professional register and very casual peninsular slang ('guay', 'mola', 'una pasada') in contexts that call for measured language. Tests whether the agent models register-appropriate vocabulary without making the learner feel corrected."
+}

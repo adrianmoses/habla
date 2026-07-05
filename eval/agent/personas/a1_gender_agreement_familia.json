@@ -1,0 +1,11 @@
+{
+  "id": "a1_gender_agreement_familia",
+  "cefr_band": "A1",
+  "scenario_domain": "hablar de la familia",
+  "error_patterns": ["gender_agreement"],
+  "L1_reliance": 0.4,
+  "fluency_signal": "weak",
+  "turn_budget": 12,
+  "opening_utterance": "Hola. Eh... yo tengo una familia muy grande.",
+  "notes": "A1 talking about family. Reliable basic 'tener' but breaks gender agreement on adjectives ('mi padre es alta', 'una hermano') and articles ('la padre'). Tests article/adjective recasts at the lowest band."
+}

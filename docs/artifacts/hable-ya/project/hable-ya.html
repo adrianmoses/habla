@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>hable ya — conversational Spanish</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    /* warm earthy palette */
+    --cream: #f5efe6;
+    --cream-2: #ece4d6;
+    --sand: #d9cdb8;
+    --sand-deep: #b8a585;
+    --clay: #c87454;
+    --clay-deep: #a8543a;
+    --terra: #d98a63;
+    --olive: #6b6b4a;
+    --ink: #2a211a;
+    --ink-2: #4a3d32;
+    --muted: #7d6f62;
+    --line: rgba(42, 33, 26, 0.12);
+    --line-strong: rgba(42, 33, 26, 0.24);
+
+    --serif: 'Instrument Serif', 'Iowan Old Style', Georgia, serif;
+    --sans: 'Geist', -apple-system, 'Helvetica Neue', sans-serif;
+    --mono: 'Geist Mono', 'SF Mono', Menlo, monospace;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    height: 100%;
+    background: var(--cream);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 15px;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  #root { height: 100vh; overflow: hidden; }
+
+  /* Tweaks panel baseline */
+  .tweaks-panel {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: rgba(42, 33, 26, 0.94);
+    color: var(--cream);
+    border-radius: 14px;
+    padding: 14px 16px;
+    font-family: var(--sans);
+    font-size: 12px;
+    min-width: 260px;
+    backdrop-filter: blur(10px);
+    z-index: 1000;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+  .tweaks-panel h4 {
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    opacity: 0.55;
+    margin-bottom: 12px;
+  }
+  .tweaks-row { margin-bottom: 10px; }
+  .tweaks-row:last-child { margin-bottom: 0; }
+  .tweaks-label {
+    display: block;
+    font-size: 11px;
+    opacity: 0.7;
+    margin-bottom: 6px;
+    font-family: var(--mono);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .tweaks-segments {
+    display: flex;
+    background: rgba(255,255,255,0.06);
+    border-radius: 8px;
+    padding: 3px;
+    gap: 2px;
+  }
+  .tweaks-seg {
+    flex: 1;
+    padding: 6px 8px;
+    background: transparent;
+    color: var(--cream);
+    border: none;
+    border-radius: 6px;
+    font-family: var(--sans);
+    font-size: 11px;
+    cursor: pointer;
+    opacity: 0.6;
+    transition: all 0.15s;
+  }
+  .tweaks-seg.active {
+    background: var(--cream);
+    color: var(--ink);
+    opacity: 1;
+  }
+  .tweaks-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .toggle-pill {
+    width: 34px; height: 20px;
+    background: rgba(255,255,255,0.12);
+    border-radius: 10px;
+    position: relative;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  .toggle-pill.on { background: var(--clay); }
+  .toggle-pill::after {
+    content: '';
+    position: absolute;
+    top: 2px; left: 2px;
+    width: 16px; height: 16px;
+    background: var(--cream);
+    border-radius: 50%;
+    transition: transform 0.2s;
+  }
+  .toggle-pill.on::after { transform: translateX(14px); }
+
+  /* hide scrollbar chrome but allow scroll */
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+  .no-scrollbar { scrollbar-width: none; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="components/icons.jsx"></script>
+<script type="text/babel" src="components/orb.jsx"></script>
+<script type="text/babel" src="components/home.jsx"></script>
+<script type="text/babel" src="components/session.jsx"></script>
+<script type="text/babel" src="components/recap.jsx"></script>
+<script type="text/babel" src="components/profile.jsx"></script>
+<script type="text/babel" src="components/tweaks.jsx"></script>
+<script type="text/babel" src="app.jsx"></script>
+</body>
+</html>

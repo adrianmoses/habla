@@ -1,0 +1,11 @@
+{
+  "id": "b1_por_para_consejos",
+  "cefr_band": "B1",
+  "scenario_domain": "consejos sobre salud",
+  "error_patterns": ["por_para"],
+  "L1_reliance": 0.15,
+  "fluency_signal": "moderate",
+  "turn_budget": 12,
+  "opening_utterance": "Quiero hacer más ejercicio para tener más energía, pero no tengo tiempo por trabajar todo el día.",
+  "notes": "B1 asking for health advice. Solid past tenses but consistently swaps por/para in purpose vs cause/exchange contexts ('voy al gimnasio por estar en forma', 'gracias para tu ayuda'). Tests recasts that reframe the prepositional phrase implicitly."
+}

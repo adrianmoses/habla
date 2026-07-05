@@ -1,0 +1,11 @@
+{
+  "id": "a1_verb_conjugation_dia_normal",
+  "cefr_band": "A1",
+  "scenario_domain": "mi día normal",
+  "error_patterns": ["verb_conjugation"],
+  "L1_reliance": 0.5,
+  "fluency_signal": "weak",
+  "turn_budget": 12,
+  "opening_utterance": "Yo levanto a las siete. Eh... I mean, me... me levanto.",
+  "notes": "A1 describing daily routine. Drops reflexive pronouns and uses bare infinitives where present-tense conjugations are needed ('yo trabajar en oficina'). Often self-corrects to English when stuck. Tests recasts that surface the conjugated form without explicit grammar lecture."
+}

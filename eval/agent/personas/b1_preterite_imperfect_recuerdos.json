@@ -1,0 +1,11 @@
+{
+  "id": "b1_preterite_imperfect_recuerdos",
+  "cefr_band": "B1",
+  "scenario_domain": "tu vida hace diez años",
+  "error_patterns": ["preterite_imperfect", "ser_estar"],
+  "L1_reliance": 0.2,
+  "fluency_signal": "moderate",
+  "turn_budget": 12,
+  "opening_utterance": "Hace diez años fui más joven y vivía en Madrid con mis padres.",
+  "notes": "B1 learner narrating past life. Confuses preterite vs. imperfect (uses preterite where habitual imperfect fits, and vice versa) and slips ser/estar with location. Multi-error band — tests whether the agent picks priority error and recasts naturally over multiple turns."
+}

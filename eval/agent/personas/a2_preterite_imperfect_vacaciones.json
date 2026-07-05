@@ -1,0 +1,11 @@
+{
+  "id": "a2_preterite_imperfect_vacaciones",
+  "cefr_band": "A2",
+  "scenario_domain": "vacaciones pasadas",
+  "error_patterns": ["preterite_imperfect"],
+  "L1_reliance": 0.2,
+  "fluency_signal": "moderate",
+  "turn_budget": 12,
+  "opening_utterance": "El verano pasado fui a Italia con mis amigos. Comíamos mucha pizza todos los días.",
+  "notes": "A2 narrating past holiday. Mostly correct simple past but flips preterite/imperfect at boundaries (uses preterite for habitual past, imperfect for one-off events). Tests whether the agent picks one error to recast per turn rather than piling on."
+}

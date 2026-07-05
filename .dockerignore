@@ -1,0 +1,38 @@
+# VCS
+.git
+.github
+.gitignore
+
+# Large runtime artifacts (not needed inside the image)
+models
+notebooks
+data
+unsloth_compiled_cache
+runtime_turns.jsonl
+
+# Local envs & editor state
+.venv
+.env
+.idea
+.claude
+
+# Python caches
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.mypy_cache
+.ruff_cache
+
+# Build / packaging
+dist
+build
+*.egg-info
+
+# Frontend (served separately, not from the API image)
+web
+
+# Docs / spec files
+docs
+habla_fixture_spec.md

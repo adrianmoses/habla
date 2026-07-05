@@ -1,0 +1,11 @@
+{
+  "id": "b1_subjunctive_avoidance_problema",
+  "cefr_band": "B1",
+  "scenario_domain": "problema en el trabajo",
+  "error_patterns": ["subjunctive_avoidance"],
+  "L1_reliance": 0.15,
+  "fluency_signal": "moderate",
+  "turn_budget": 12,
+  "opening_utterance": "Mi jefe quiere que yo trabajo los fines de semana, pero no me gusta esta idea.",
+  "notes": "B1 talking about a work problem. Recognizes contexts that trigger subjunctive (querer que, esperar que, ojalá) but defaults to the indicative every time ('quiero que tienes', 'es importante que vamos'). Tests whether the agent recasts the subordinate verb without naming the rule."
+}

@@ -1,0 +1,11 @@
+{
+  "id": "c1_subjunctive_register_arte",
+  "cefr_band": "C1",
+  "scenario_domain": "arte como protesta",
+  "error_patterns": ["subjunctive_avoidance", "register_slip"],
+  "L1_reliance": 0.05,
+  "fluency_signal": "strong",
+  "turn_budget": 12,
+  "opening_utterance": "Aunque mucha gente piensa que el arte y la política tienen que estar separados, yo no estoy de acuerdo — el arte siempre dice algo.",
+  "notes": "C1 articulating a position on art and protest. Mostly accurate but avoids low-frequency subjunctive triggers (concessive 'aunque' with hypothetical, adjective clauses with negation) and occasionally drops into casual register inside an academic-leaning argument. Tests subtle recasting at near-native level."
+}

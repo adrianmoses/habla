@@ -1,0 +1,11 @@
+{
+  "id": "b2_subjunctive_por_para_decision",
+  "cefr_band": "B2",
+  "scenario_domain": "decisión difícil",
+  "error_patterns": ["subjunctive", "por_para"],
+  "L1_reliance": 0.1,
+  "fluency_signal": "moderate",
+  "turn_budget": 12,
+  "opening_utterance": "Mi hermano insiste que dejo mi trabajo para ayudarle por su nuevo negocio, pero no estoy seguro.",
+  "notes": "B2 weighing a difficult decision. Multi-error: misses subjunctive after volition/emotion verbs AND swaps por/para in purpose/cause contexts. Tests whether the agent picks the higher-priority error (subjunctive) to recast and lets the secondary error pass naturally."
+}
