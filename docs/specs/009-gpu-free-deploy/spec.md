@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | id | 009 |
-| status | draft |
+| status | approved |
 | created | 2026-07-05 |
 | covers roadmap | #009 (+ the `.env`-loading gap surfaced by specs 001/007) |
 
