@@ -1,6 +1,22 @@
-# hable-ya
+# habla
 
-An on-device, voice-first Spanish language-acquisition agent. A fine-tuned Gemma 4 E4B model acts simultaneously as the conversational partner, pedagogical assessor, and adaptive engine. The runtime is a Pipecat STT → LLM → TTS pipeline (faster-whisper + Gemma served via llama.cpp + piper-tts) exposed as a FastAPI WebSocket, with a knowledge-graph learner model (Postgres + Apache AGE) updated via tool calls.
+A voice-first Spanish language-acquisition agent. Claude acts simultaneously as
+the conversational partner, pedagogical assessor, and adaptive engine. The
+runtime is a Pipecat STT → LLM → TTS pipeline exposed as a FastAPI WebSocket,
+with a knowledge-graph learner model (Postgres + Apache AGE) updated via native
+tool calls.
+
+`habla` is the cloud-API fork of [`hable-ya`](https://github.com/adrianmoses/hable-ya):
+same product, but the three on-device models are replaced with managed APIs.
+
+| Role | hable-ya (on-device) | habla (cloud) |
+|---|---|---|
+| LLM | fine-tuned Gemma 4 E4B via llama.cpp | **Claude** (`claude-sonnet-4-6`, Pipecat `AnthropicLLMService`) |
+| STT | faster-whisper (CUDA) | **OpenAI transcription** (`gpt-4o-transcribe`) |
+| TTS | Piper | **Cartesia** (`sonic-3`) |
+
+Silero VAD + SmartTurn v3 (small local CPU/ONNX models) are unchanged and stay
+in-process. The runtime is CPU-only — no GPU required.
 
 Based on ideas from `comprende-ya` and `habla.practice`.
 
@@ -15,43 +31,42 @@ Product, architecture, and roadmap live under [`docs/specs/`](docs/specs/):
 
 ## Setup
 
-Requires Python ≥3.12, `uv`, Docker with NVIDIA GPU support, and:
+Requires Python ≥3.12, `uv`, Docker, and three managed-API keys:
 
-- `HF_TOKEN` — HuggingFace auth (Gemma is a gated model). Set env var or run `huggingface-cli login`.
-- `ANTHROPIC_API_KEY` — only needed for fixture generation, recast judging, and agent eval.
+- `ANTHROPIC_API_KEY` — Claude (LLM) and the eval judges.
+- `OPENAI_API_KEY` — transcription (STT).
+- `CARTESIA_API_KEY` + `CARTESIA_VOICE_ID` — speech synthesis (TTS). The voice id
+  is owner-supplied and has no default; the runtime fails fast if it is unset.
 
 ```bash
-uv sync --all-extras
-cp .env.example .env   # then edit
+uv sync
+cp .env.example .env   # then fill in the three keys + CARTESIA_VOICE_ID
 ```
+
+The `eval` extra (Opus judges, spaCy recast scoring) is optional:
+`uv sync --extra eval`.
 
 ## Usage
 
-### Download the model
+### Run
 
 ```bash
-# Both GGUF (for llama.cpp) and HF weights (for fine-tuning)
-python scripts/download_model.py
-
-# GGUF only  → models/gemma-4-e4b.gguf
-python scripts/download_model.py --gguf-only
-
-# HF weights only  → models/gemma-4-e4b-hf/
-python scripts/download_model.py --hf-only
-
-# Re-download even if files exist
-python scripts/download_model.py --force
+docker compose up
 ```
 
-### Serve the model
+Brings up the FastAPI `app` (WebSocket on `:8000`) and the Postgres + Apache AGE
+`db` service. The app reads its keys from `.env`.
+
+To run the app on the host instead of in-compose (db still in Docker):
 
 ```bash
-docker compose up llama
+docker compose up db
+uv run uvicorn api.main:app --host 0.0.0.0 --port 8000
 ```
-
-Serves the fine-tuned GGUF at `http://localhost:8080` (OpenAI-compatible).
 
 ### Generate eval fixtures
+
+Requires `ANTHROPIC_API_KEY` (fixtures are generated via the Anthropic Batches API).
 
 ```bash
 # Full pipeline: generate → validate → review → consolidate
@@ -66,42 +81,32 @@ python scripts/generate_eval_fixtures.py consolidate
 
 ### Run model eval
 
-Requires the llama.cpp server running.
+Scores Claude against the fixture conversations on the pedagogical and
+tool-fidelity dimensions. Requires `ANTHROPIC_API_KEY`; no local model server.
 
 ```bash
-python -m eval.run_eval --base-url http://localhost:8080 --output results.json
+python -m eval.run_eval --output results.json
 
-# Specific categories
-python -m eval.run_eval --base-url http://localhost:8080 --output results.json \
-    --categories single_error_recast,multi_error
+# A specific model or category subset
+python -m eval.run_eval --output results.json \
+    --model claude-sonnet-4-6 --categories single_error_recast,multi_error
 
 # Concurrency and timeout
-python -m eval.run_eval --base-url http://localhost:8080 --output results.json \
-    --concurrency 8 --timeout 60
+python -m eval.run_eval --output results.json --concurrency 8 --timeout 60
+
+# Baseline ablation: role-only prompt (no register rules / recast / tool schema),
+# to measure how much the runtime prompt engineering buys.
+python -m eval.run_eval --output minimal.json --minimal-prompt
 ```
 
 ### Compare eval runs
 
 ```bash
-python -m eval.compare baseline.json finetuned.json
+python -m eval.compare minimal.json full.json
 ```
 
-Prints per-dimension and per-band deltas with threshold-based recommendations.
-
-### Generate fine-tuning datasets
-
-```bash
-# Consolidate fixtures then generate the SFT dataset
-python -m finetune.generate
-
-# Skip consolidation if already done
-python -m finetune.generate --no-consolidate
-
-# Validate generated datasets
-python -m finetune.validate
-```
-
-Outputs JSONL to `finetune/datasets/`. Training itself runs in [`notebooks/gemma4_finetune.ipynb`](notebooks/gemma4_finetune.ipynb) via Unsloth.
+Prints per-dimension and per-band deltas with threshold-based recommendations —
+e.g. the unprompted baseline vs the full runtime prompt.
 
 ### Inspect the learner model
 
@@ -152,6 +157,16 @@ SELECT * FROM cypher('learner_knowledge', $$
   MATCH (n) RETURN label(n) AS label, count(*) AS n
 $$) AS (label agtype, n agtype);
 ```
+
+## History
+
+This fork replaced hable-ya's on-device model stack with cloud APIs. The
+fine-tuning workstream (Unsloth SFT dataset generation, the training notebook)
+and the on-device serving tooling (`download_model.py`, the llama.cpp GPU compose
+service, faster-whisper / piper) were removed in the migration — see
+[`ROADMAP.md`](docs/specs/ROADMAP.md) #009–#012. The eval harness was re-baselined
+to score Claude directly (#012); the Opus recast/session judges and the fixture
+pipeline carry over unchanged.
 
 ## Development
 
