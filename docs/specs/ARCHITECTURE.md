@@ -7,11 +7,19 @@
 | created | 2026-04-19 |
 | inferred-from | docker-compose.yml, api/main.py, api/routes/*, hable-ya/config.py, hable-ya/pipeline/*, hable-ya/learner/*, hable-ya/tools/schema.py, eval/run_eval.py, eval/scoring/*, eval/fixtures/schema.py, finetune/format.py, finetune/generate.py, scripts/fixtures/*, pyproject.toml, habla_fixture_spec.md |
 
+> **Migration note (spec #015).** This document is `status: inferred` and was
+> written against the on-device hable-ya. The cloud fork (#001–#012) replaced the
+> three on-device models with managed APIs and deleted the fine-tune workstream.
+> The **External Dependencies**, **Key Constraints**, and runtime **Data Flow**
+> sections below have been updated to the cloud posture; the component map and
+> implementation-status descriptions ("stubbed", `aiosqlite`, etc.) are `inferred`
+> and predate later specs — a full re-baseline is separate future work.
+
 ## System Overview
 
-`hable-ya` is composed of three logical systems that share a model artifact but otherwise run independently:
+`habla` (cloud fork of `hable-ya`) is composed of three logical systems that run independently:
 
-1. **Runtime voice agent** (stubbed): FastAPI app exposing a WebSocket that drives a Pipecat pipeline (whisper STT → llama.cpp-served Gemma 4 → piper TTS), with tool-call handling and turn observation writing into a SQLite-backed learner profile.
+1. **Runtime voice agent:** FastAPI app exposing a WebSocket that drives a Pipecat pipeline (OpenAI `gpt-4o-transcribe` STT → Claude `claude-sonnet-4-6` via `AnthropicLLMService` → Cartesia `sonic-3` TTS), with native `log_turn` tool-call handling and turn observation writing into a Postgres + Apache AGE learner profile. Silero VAD + SmartTurn v3 are local (CPU/ONNX); no local model server or GPU.
 2. **Eval harness** (implemented): CLI that runs fixture conversations against the llama.cpp endpoint and scores responses on 7 pedagogical / tool-fidelity dimensions, with an Opus second-pass judge for recast quality and a comparator for baseline-vs-tuned runs.
 3. **Data / fine-tuning pipeline** (implemented): Anthropic Batches API generates fixtures across category × CEFR-band matrices; validators screen for leakage and format issues; consolidated fixtures feed an SFT JSONL builder; training runs in a Jupyter notebook using Unsloth.
 
@@ -104,18 +112,17 @@ hable-ya/
 ```
 Mic
  └─► Pipecat pipeline
-      ├─► Silero VAD
-      ├─► faster-whisper (STT, user utterance in es/en)
+      ├─► Silero VAD + SmartTurn v3 (local, CPU/ONNX)
+      ├─► OpenAI transcription API (STT, gpt-4o-transcribe, user utterance in es/en)
       ├─► HableYaTurnObserver (prior-context state)
       ├─► System prompt builder (pipeline/prompts/builder.py)
       │     uses REGISTER_BY_LEVEL, COLD_START_INSTRUCTIONS,
       │     learner profile, THEMES_BY_LEVEL
-      ├─► OpenAI client → llama.cpp /v1/chat/completions
-      │     serves gemma-4-e4b-finetuned_gguf
-      ├─► HableYaToolHandler
-      │     parses [TOOL_CALL: log_turn]{...} from response
-      │     dispatches to learner profile updates
-      ├─► piper-tts (TTS)
+      ├─► AnthropicLLMService → Claude (claude-sonnet-4-6)
+      │     native structured tool-calling, tool_choice: auto
+      ├─► log_turn function handler (register_function)
+      │     consumes native function-call frames → learner profile updates
+      ├─► Cartesia TTS (sonic-3)
       └─► Speaker
 
 Learner profile writes (async):
@@ -134,7 +141,7 @@ All components downstream of Pipecat are stubs today. `[INFERRED: uncertain — 
 fixtures JSON (eval/fixtures/*.json, 8 categories)
  └─► eval/run_eval.py
       ├─► render conversation prior turns as messages
-      ├─► openai.ChatCompletion → llama.cpp endpoint
+      ├─► Anthropic SDK → Claude (claude-sonnet-4-6), native log_turn tool-calling (#012)
       ├─► eval/scoring/turn.py: parse_tool_calls + score_turn
       │     • recast_present (eval/scoring/recast.py, spaCy)
       │     • recast_explicit (pattern match)
@@ -146,11 +153,12 @@ fixtures JSON (eval/fixtures/*.json, 8 categories)
       └─► aggregate by dimension / CEFR band / category → results.json
 
 compare.py:
- baseline.json + finetuned.json
+ minimal.json + full.json
   └─► per-dimension + per-band deltas, threshold recommendations
+      (cloud framing: minimal-prompt ablation vs full runtime prompt, #012)
 ```
 
-### Fixture + SFT pipeline (implemented)
+### Fixture pipeline (implemented)
 
 ```
 scripts/fixtures/prompts/<category>.py (per-band prompt templates)
@@ -161,64 +169,59 @@ scripts/fixtures/prompts/<category>.py (per-band prompt templates)
                      └─► _approved/ per-category JSON
                           └─► scripts/fixtures/consolidate_fixtures.py
                                └─► eval/fixtures/<category>.json (canonical)
-
-canonical fixtures
- └─► finetune/generate.py (3 of 8 categories: recast + multi_error + tool_call_correctness)
-      └─► finetune/format.py: fixture_to_sft (system prompt + turns + tool call target)
-           └─► finetune/datasets/*.jsonl
-                └─► finetune/validate.py (JSONL sanity)
-                     └─► notebooks/gemma4_finetune.ipynb (Unsloth SFT)
-                          └─► models/gemma-4-e4b-finetuned/
-                               └─► convert → models/gemma-4-e4b-finetuned_gguf/
-                                    └─► served by llama.cpp (docker-compose)
+                                    └─► consumed by eval/run_eval.py (above)
 ```
+
+> The downstream SFT / fine-tune stage (`finetune/`, the Unsloth training
+> notebook, and the llama.cpp-served Gemma artifacts) was removed in #010/#011.
+> The cloud fork evaluates Claude directly against the canonical fixtures.
 
 ## External Dependencies
 
 **Services at runtime**
-- **llama.cpp server** (`ghcr.io/ggml-org/llama.cpp:server-cuda`) — OpenAI-compatible endpoint on :8080, requires NVIDIA GPU, mounts `./models` into `/models`.
-- **PostgreSQL + Apache AGE** — persistence for learner state (relational) and the knowledge-graph learner model (AGE). Will need to be added to `docker-compose.yml` alongside `app` and `llama`.
-- **Anthropic API** — used only during fixture generation, recast judging, and (future) agent eval. Requires `ANTHROPIC_API_KEY`.
-- **HuggingFace Hub** — gated Gemma downloads (`HF_TOKEN` / `huggingface-cli login`).
+- **Anthropic API** — Claude (`claude-sonnet-4-6`) is the runtime LLM via Pipecat `AnthropicLLMService`; also drives the eval Opus judges and fixture generation. Requires `ANTHROPIC_API_KEY`.
+- **OpenAI API** — transcription (`gpt-4o-transcribe`) for STT. Requires `OPENAI_API_KEY`.
+- **Cartesia API** — speech synthesis (`sonic-3`) for TTS. Requires `CARTESIA_API_KEY` + an owner-supplied `CARTESIA_VOICE_ID` (no default; fail-fast if unset).
+- **PostgreSQL + Apache AGE** — persistence for learner state (relational) and the knowledge-graph learner model (AGE). Runs as the `db` compose service (image `apache/age:release_PG18_1.7.0`) alongside `app`.
+
+The llama.cpp GPU server and the HuggingFace-gated Gemma download were removed in #009/#011; the runtime is CPU-only and needs no local model artifacts.
 
 **Python runtime libraries (abridged)**
-- **Voice:** pipecat-ai[silero,daily], faster-whisper, piper-tts
+- **Voice:** pipecat-ai[silero,daily] with Silero VAD + SmartTurn v3 (local CPU/ONNX)
 - **API:** fastapi, uvicorn, websockets
-- **LLM client:** openai (targeted at llama.cpp), anthropic (eval/finetune only)
-- **ML:** transformers, torch, unsloth, datasets, huggingface_hub (finetune extra)
-- **NLP heuristics:** spacy (Spanish), langdetect
-- **Persistence (decided, not yet wired):** PostgreSQL + Apache AGE graph extension (likely `asyncpg` driver). The `aiosqlite` entry in `pyproject.toml` is legacy and will be replaced.
+- **Model SDKs:** anthropic (Claude, core), openai (transcription), cartesia (TTS)
+- **NLP heuristics (eval extra):** spacy (Spanish), langdetect
+- **Persistence:** PostgreSQL + Apache AGE via the `asyncpg` driver (`database_url` in `config.py`). The legacy `aiosqlite` entry has been dropped.
 - **Dev UX:** rich, pandas, pytest, ruff, mypy
 
 **Build / deployment**
 - Python ≥3.12, `uv` lockfile
-- Docker Compose (`app` FastAPI + `llama` llama.cpp CUDA)
-- Hatchling build backend (packages: `hable-ya`, `api`)
+- Docker Compose (`app` FastAPI + `db` Postgres/AGE) — no GPU, no model server
+- Hatchling build backend (packages: `hable_ya`, `api`)
 
 ## Key Constraints
 
-**Model-serving constraints (from `docker-compose.yml`)**
-- Gemma 4 E4B quantized to Q8_0 GGUF.
-- `--n-gpu-layers 99` (full offload), `--parallel 4`, `--ctx-size 16384`, `--cont-batching`.
-- Single GPU reservation; no multi-GPU topology.
+**Model constraints (from `hable_ya/config.py`)**
+- LLM: Claude `claude-sonnet-4-6` via `AnthropicLLMService`; `llm_max_tokens = 1024` (room for a short spoken reply + native `log_turn` args); thinking disabled for voice latency.
+- STT: OpenAI `gpt-4o-transcribe`, Spanish; TTS: Cartesia `sonic-3` with an owner-supplied `cartesia_voice_id`.
+- CPU-only app container; no GPU reservation, no local model server. Network round-trip latency for the added cloud hop is re-benchmarked in #013.
 
-**Pedagogical constraints (scoring thresholds in `eval/compare.py`, forbidden phrases in `finetune/format.py`)**
+**Pedagogical constraints (scoring thresholds in `eval/compare.py`, forbidden phrases in the runtime prompt under `hable_ya/pipeline/prompts/`)**
 - `recast_present ≥ 0.70`, `recast_explicit ≤ 0.20`, `register_correct ≥ 0.70`, `L1_in_response ≤ 0.15`, `sentence_count_ok ≥ 0.75`, `question_count_ok ≥ 0.80`, `error_repeated ≤ 0.05`.
 - Composite score = `0.7 * pedagogical + 0.3 * tool_fidelity`.
 - Cold-start: `band_accuracy ≥ 0.75`, `MAE ≤ 0.20`.
-- Responses must avoid explicit-correction phrases (enforced by both scoring heuristic and SFT forbidden-phrase list).
+- Responses must avoid explicit-correction phrases (enforced by the scoring heuristic and the runtime prompt's forbidden-phrase list).
 - Recast form must appear verbatim (modulo grammatical person) in the agent response.
 
-**Configuration (from `hable-ya/config.py` and `.env.example`)**
-- `db_path` — legacy SQLite path; will be replaced by a Postgres DSN (e.g. `database_url`) once the DB layer is built
-- `host`, `port` — FastAPI bind
-- `llama_cpp_url` — default `http://localhost:8080` for the llama.cpp endpoint
-- `HF_TOKEN`, `ANTHROPIC_API_KEY` — env vars for downloads and fixture/judge calls
+**Configuration (from `hable_ya/config.py` and `.env.example`)**
+- `database_url` — Postgres DSN (default `postgresql://hable_ya:hable_ya@localhost:5433/hable_ya`); compose overrides to `db:5432` in-container. `db_pool_*` tune the asyncpg pool.
+- `host`, `port`, `log_level` — FastAPI bind
+- `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `CARTESIA_API_KEY`, `CARTESIA_VOICE_ID` — provider credentials (read from the standard unprefixed env vars, not `HABLE_YA_`)
+- `llm_model_name`, `stt_model`, `cartesia_model`, `smart_turn_stop_secs`, `vad_stop_secs`, `audio_sample_rate` — model + turn-taking tunables
 
 **Scope constraints (from project memory)**
-- SFT only — no DPO pipeline even though `fixture_to_dpo()` exists as scaffolding.
-- Fine-tuning dataset is intentionally narrow: only `single_error_recast`, `multi_error`, and `tool_call_correctness` categories, because those are the categories that move the `recast_present` and `tool_args_correct` metrics.
-- "Baseline" refers to the untuned Gemma 4 model state, not to a frozen fixture set; fixtures are renewable.
+- No fine-tuning — the cloud fork uses Claude via prompt + native tools; the `finetune/` package was removed in #011.
+- "Baseline" now refers to the **minimal-prompt ablation** (`--minimal-prompt`: role-only system prompt, no register/recast/tool schema), measuring what the runtime prompt engineering buys — not an untuned Gemma checkpoint (#012).
 
 **Scope decisions**
 - **Single-tenant.** The runtime serves one learner per deployment; no tenant isolation, no per-tenant auth, no multi-user session routing.

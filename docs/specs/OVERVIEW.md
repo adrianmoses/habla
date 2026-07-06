@@ -9,7 +9,23 @@
 
 ## Product Summary
 
-`hable-ya` is an on-device, voice-first Spanish language-acquisition agent. A single fine-tuned Gemma 4 E4B model acts simultaneously as conversational partner, pedagogical assessor, and adaptive engine. The runtime is a Pipecat STT → LLM → TTS pipeline (faster-whisper + Gemma served via llama.cpp + piper-tts), exposed as a FastAPI WebSocket. A knowledge-graph–based learner model (tracked via tool calls from the agent) captures strengths, weaknesses, CEFR level, and progression.
+`habla` is a cloud-API, voice-first Spanish language-acquisition agent — the
+managed-API fork of the on-device [`hable-ya`](https://github.com/adrianmoses/hable-ya).
+Claude acts simultaneously as conversational partner, pedagogical assessor, and
+adaptive engine. The runtime is a Pipecat STT → LLM → TTS pipeline (OpenAI
+`gpt-4o-transcribe` STT + Claude `claude-sonnet-4-6` via `AnthropicLLMService` +
+Cartesia `sonic-3` TTS), exposed as a FastAPI WebSocket. Silero VAD + SmartTurn
+v3 remain small local CPU/ONNX models in-process; the runtime is otherwise
+CPU-only with no local model server. A knowledge-graph–based learner model
+(tracked via native tool calls from the agent) captures strengths, weaknesses,
+CEFR level, and progression.
+
+> **Migration note.** This document is `status: inferred` and predates the
+> cloud fork on axes beyond the model boundary (it still describes parts of the
+> runtime as "stubbed"; specs 029/049 have since landed a real learner model and
+> leveling). Spec #015 updated only the on-device → cloud posture, deployment /
+> dependency surface, and the privacy statement below. A full re-baseline of the
+> inferred sections is separate future work.
 
 The repo today is structured as three parallel workstreams:
 1. A model/eval workstream (complete) that scores model checkpoints against fixture conversations on pedagogical and tool-fidelity dimensions.
@@ -20,7 +36,7 @@ The repo today is structured as three parallel workstreams:
 
 Two distinct consumer groups are inferable:
 
-- **End user (runtime):** A Spanish learner (any CEFR band A1–C1) using a voice-only conversational partner on a local device. The device runs llama.cpp + Pipecat + piper/whisper; no cloud LLM dependency at inference time. `[INFERRED: uncertain — please verify target device class; README mentions "different devices" but no specific targets are in code]`.
+- **End user (runtime):** A Spanish learner (any CEFR band A1–C1) using a voice-only conversational partner. The client runs Pipecat + Silero VAD + SmartTurn v3 locally; STT, the LLM, and TTS are managed cloud APIs (OpenAI / Anthropic / Cartesia), so learner audio and text leave the device at inference time (see the privacy non-goal below). `[INFERRED: uncertain — please verify target device class; README mentions "different devices" but no specific targets are in code]`.
 - **Researcher / developer (model pipeline):** The project owner, iterating on the Gemma 4 E4B base model through fixture-driven eval, SFT dataset generation, and fine-tuning. This is the primary consumer today — almost all implemented code lives in `eval/`, `finetune/`, and `scripts/fixtures/`.
 
 ## Job To Be Done
@@ -33,13 +49,22 @@ The README's success definition operationalizes this as a composite score `0.7 *
 
 Inferred from code scope and explicit README statements:
 
-- **Not** a cloud-hosted service — deployment is local/on-device (llama.cpp server).
+- **Cloud-API service (posture, not a non-goal).** `habla` deliberately depends
+  on managed APIs at inference time (Claude / OpenAI / Cartesia) — the inverse of
+  hable-ya's on-device stance. It is **not** on-device and **not** GPU-served;
+  the app container is CPU-only (Postgres + AGE is the only other service).
+- **Not privacy-preserving on-device.** As a direct consequence of the cloud
+  posture, **learner utterances leave the device**: spoken audio goes to OpenAI
+  (STT), the transcript goes to Anthropic (LLM), and the agent's reply text goes
+  to Cartesia (TTS). No data-processing agreement, retention, or residency
+  guarantee is claimed here — only that the data flow is off-device by design.
+  Deployments with on-device privacy requirements should use hable-ya instead.
 - **Not** a text chat interface — the primary surface is voice (`/ws/session` WebSocket). `[INFERRED: uncertain — a text interface for dev/testing may be implied but is not present]`.
 - **Not** an explicit-correction tutor — recasting is a core design constraint, scored negatively when the agent corrects explicitly.
 - **Not** multi-language at launch — Spanish-from-English is the v1 target; the README mentions supporting other source/target pairs as a future process, not a v1 requirement.
 - **Not** multi-tenant — the runtime is single-tenant (one learner per deployment). No tenant isolation, per-tenant auth, or multi-user session routing is planned.
 - **Not** a full LMS — no lesson plans, no curriculum progression beyond the knowledge-graph learner model.
-- **DPO fine-tuning is out of scope** for this repo despite `fixture_to_dpo()` existing in `finetune/format.py` (per project memory). SFT-only.
+- **Fine-tuning (SFT and DPO) is out of scope** for the cloud fork — the `finetune/` package was removed in #011. The model under test is Claude via prompt + native tools, not a tuned checkpoint.
 
 ## Tech Stack
 
@@ -47,13 +72,14 @@ From `pyproject.toml` and `docker-compose.yml`:
 
 - **Language / runtime:** Python ≥3.12, `uv` lockfile
 - **API:** FastAPI + uvicorn, WebSocket via `websockets`
-- **Voice pipeline:** `pipecat-ai[silero,daily]`, `faster-whisper` (STT), `piper-tts` (TTS)
-- **LLM client:** `openai` SDK pointed at llama.cpp's OpenAI-compatible endpoint
-- **Model serving:** llama.cpp CUDA server (Docker image `ghcr.io/ggml-org/llama.cpp:server-cuda`), Gemma 4 E4B GGUF, 99 GPU layers, 16384 ctx, 4-way parallel, continuous batching
+- **Voice pipeline:** `pipecat-ai[silero,daily]` with Silero VAD + SmartTurn v3 local (CPU/ONNX); STT/LLM/TTS are managed APIs (below)
+- **LLM:** `anthropic` (Claude `claude-sonnet-4-6`) via Pipecat `AnthropicLLMService`, native structured tool-calling for `log_turn`
+- **STT / TTS:** `openai` (`gpt-4o-transcribe`) and `cartesia` (`sonic-3`) — managed APIs, no local model server or GPU
 - **Persistence (planned):** PostgreSQL with the [Apache AGE](https://age.apache.org/) extension for graph support of the learner model. The current `pyproject.toml` still lists `aiosqlite`; this is a known inconsistency to be replaced by an async Postgres driver (e.g. `asyncpg`). No DB code is implemented yet.
 - **Config:** `pydantic-settings`, `python-dotenv`
-- **Eval (optional extra):** `anthropic` (Opus judge), `spacy` (Spanish lemmatization for recast scoring), `langdetect`, `rich`, `pandas`
-- **Fine-tune (optional extra):** `anthropic` (Opus-generated skeletons), `datasets`, `unsloth`, `transformers`, `torch`, `huggingface_hub`
+- **LLM SDK:** `anthropic` — promoted to core in #010 (the runtime imports it); also used by the eval Opus judges.
+- **Eval (optional extra):** `spacy` (Spanish lemmatization for recast scoring), `langdetect`, `rich`, `pandas`
+- **Fine-tune:** removed. The on-device fine-tune extra (`datasets`, `unsloth`, `transformers`, `torch`, `huggingface_hub`) and the `finetune/` package were dropped in #010/#011.
 - **Dev:** `pytest` + `pytest-asyncio`, `ruff` (line-length 88, py312), `mypy` strict
 
 ## Testing Suite
