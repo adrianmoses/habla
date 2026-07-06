@@ -45,12 +45,19 @@ def stage_for_processor(processor: str) -> str | None:
 
 
 class PerStageLatencyObserver(BaseObserver):
-    """Logs per-service TTFB from `MetricsFrame`s, one line per stage per turn."""
+    """Records + logs per-service TTFB from `MetricsFrame`s, once per turn.
+
+    Each captured `(stage, ttfb_ms)` is appended to `self.records` (a bounded
+    ring) and logged under `hable_ya.latency`. The `records` attribute is the
+    programmatic view — tests assert on it rather than on log output, which is
+    unreliable to capture once a global `logging.disable` is in effect.
+    """
 
     def __init__(self) -> None:
         super().__init__()
         self._seen: deque[int] = deque(maxlen=_SEEN_RING_SIZE)
         self._seen_set: set[int] = set()
+        self.records: deque[tuple[str, int]] = deque(maxlen=_SEEN_RING_SIZE)
 
     async def on_push_frame(self, data: FramePushed) -> None:
         frame = data.frame
@@ -58,7 +65,7 @@ class PerStageLatencyObserver(BaseObserver):
             return
         # Dedup on the frame's own process-unique id (not Python's id(), which
         # is reused once a short-lived frame is GC'd). One MetricsFrame is
-        # pushed through every downstream hop; we log its TTFB once.
+        # pushed through every downstream hop; we record its TTFB once.
         frame_id = frame.id
         if frame_id in self._seen_set:
             return
@@ -73,9 +80,11 @@ class PerStageLatencyObserver(BaseObserver):
             stage = stage_for_processor(metric.processor)
             if stage is None:
                 continue
+            ttfb_ms = int(metric.value * 1000)
+            self.records.append((stage, ttfb_ms))
             latency_logger.info(
                 "stage=%s ttfb_ms=%d processor=%s",
                 stage,
-                int(metric.value * 1000),
+                ttfb_ms,
                 metric.processor,
             )

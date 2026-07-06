@@ -6,9 +6,6 @@ capture/dedup/stage-mapping logic is exercised without a running pipeline.
 
 from __future__ import annotations
 
-import logging
-from collections.abc import Iterator
-from contextlib import contextmanager
 from unittest.mock import MagicMock
 
 import pytest
@@ -68,33 +65,6 @@ class TestStageMapping:
         assert stage_for_processor("HableYaTurnObserver#0") is None
 
 
-@contextmanager
-def capture_latency_logs() -> Iterator[list[str]]:
-    """Capture `hable_ya.latency` records via a handler on that logger directly.
-
-    Not `caplog`: caplog attaches to the root logger and relies on propagation,
-    which is only configured once something imports `api.main`
-    (`logging.basicConfig`). Attaching here makes the assertion independent of
-    test ordering / root config (CI runs this file in isolation).
-    """
-    logger = logging.getLogger("hable_ya.latency")
-    messages: list[str] = []
-
-    class _Collect(logging.Handler):
-        def emit(self, record: logging.LogRecord) -> None:
-            messages.append(record.getMessage())
-
-    handler = _Collect()
-    prev_level = logger.level
-    logger.addHandler(handler)
-    logger.setLevel(logging.INFO)
-    try:
-        yield messages
-    finally:
-        logger.removeHandler(handler)
-        logger.setLevel(prev_level)
-
-
 def _pushed(frame: object) -> FramePushed:
     return FramePushed(
         source=MagicMock(),
@@ -112,40 +82,29 @@ def _metrics_frame(processor: str, ttfb_s: float) -> MetricsFrame:
 class TestObserver:
     async def test_captures_each_stage(self) -> None:
         obs = PerStageLatencyObserver()
-        with capture_latency_logs() as messages:
-            await obs.on_push_frame(_pushed(_metrics_frame("OpenAISTTService#0", 0.12)))
-            await obs.on_push_frame(
-                _pushed(_metrics_frame("AnthropicLLMService#0", 0.5))
-            )
-            await obs.on_push_frame(
-                _pushed(_metrics_frame("CartesiaTTSService#0", 0.2))
-            )
-        text = "\n".join(messages)
-        assert "stage=stt ttfb_ms=120" in text
-        assert "stage=llm ttfb_ms=500" in text
-        assert "stage=tts ttfb_ms=200" in text
+        await obs.on_push_frame(_pushed(_metrics_frame("OpenAISTTService#0", 0.12)))
+        await obs.on_push_frame(_pushed(_metrics_frame("AnthropicLLMService#0", 0.5)))
+        await obs.on_push_frame(_pushed(_metrics_frame("CartesiaTTSService#0", 0.2)))
+        assert list(obs.records) == [("stt", 120), ("llm", 500), ("tts", 200)]
 
     async def test_dedups_same_frame(self) -> None:
         obs = PerStageLatencyObserver()
         frame = _metrics_frame("OpenAISTTService#0", 0.1)
-        with capture_latency_logs() as messages:
-            # Same frame observed at multiple downstream hops → logged once.
-            await obs.on_push_frame(_pushed(frame))
-            await obs.on_push_frame(_pushed(frame))
-            await obs.on_push_frame(_pushed(frame))
-        assert sum("stage=stt" in m for m in messages) == 1
+        # Same frame observed at multiple downstream hops → recorded once.
+        await obs.on_push_frame(_pushed(frame))
+        await obs.on_push_frame(_pushed(frame))
+        await obs.on_push_frame(_pushed(frame))
+        assert list(obs.records) == [("stt", 100)]
 
     async def test_ignores_non_metrics_frame(self) -> None:
         obs = PerStageLatencyObserver()
-        with capture_latency_logs() as messages:
-            await obs.on_push_frame(_pushed(TextFrame(text="hola")))
-        assert messages == []
+        await obs.on_push_frame(_pushed(TextFrame(text="hola")))
+        assert list(obs.records) == []
 
     async def test_ignores_non_ttfb_metric(self) -> None:
         obs = PerStageLatencyObserver()
         frame = MetricsFrame(
             data=[ProcessingMetricsData(processor="OpenAISTTService#0", value=0.1)]
         )
-        with capture_latency_logs() as messages:
-            await obs.on_push_frame(_pushed(frame))
-        assert messages == []
+        await obs.on_push_frame(_pushed(frame))
+        assert list(obs.records) == []
