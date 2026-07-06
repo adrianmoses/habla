@@ -38,9 +38,24 @@ Requires Python ≥3.12, `uv`, Docker, and three managed-API keys:
 - `CARTESIA_API_KEY` + `CARTESIA_VOICE_ID` — speech synthesis (TTS). The voice id
   is owner-supplied and has no default; the runtime fails fast if it is unset.
 
+The `/ws/session` endpoint is gated by a shared-secret token
+(`HABLE_YA_SESSION_AUTH_TOKEN`) and is **fail-closed** — if the token is unset,
+the endpoint refuses every connection. Generate a URL-safe random secret:
+
+```bash
+openssl rand -hex 32
+# or: python -c "import secrets; print(secrets.token_urlsafe(32))"
+```
+
+Put it in `.env` as `HABLE_YA_SESSION_AUTH_TOKEN=…`, and pass it from the client
+(`voice_client.py --token …`). For local dev you can bypass auth with
+`HABLE_YA_SESSION_AUTH_DISABLED=true` — never in production. The token crosses
+the wire in cleartext until a TLS/`wss://` reverse proxy is in front, so don't
+expose the raw `ws://` port publicly without one.
+
 ```bash
 uv sync
-cp .env.example .env   # then fill in the three keys + CARTESIA_VOICE_ID
+cp .env.example .env   # then fill in the three keys + CARTESIA_VOICE_ID + the auth token
 ```
 
 The `eval` extra (Opus judges, spaCy recast scoring) is optional:
@@ -60,9 +75,16 @@ Brings up the FastAPI `app` (WebSocket on `:8000`) and the Postgres + Apache AGE
 To run the app on the host instead of in-compose (db still in Docker):
 
 ```bash
-docker compose up db
+docker compose up -d db     # start Postgres+AGE FIRST — see note below
 uv run uvicorn api.main:app --host 0.0.0.0 --port 8000
 ```
+
+The app runs Alembic migrations and opens the DB pool **during startup**, before
+it serves — so the `db` service must be up first. If Postgres is unreachable the
+lifespan raises and uvicorn exits (it won't sit and retry indefinitely). A
+successful boot ends with `hable-ya ready on 0.0.0.0:8000`; watch for that line.
+(When redirecting output to a file/pipe, later startup logs may buffer and lag —
+probe `GET /health` for the real readiness signal.)
 
 ### Generate eval fixtures
 

@@ -50,15 +50,31 @@ def _write_wav_pcm(path: Path, pcm: bytes) -> None:
 
 
 async def _stream(
-    url: str, input_wav: Path, output_wav: Path, listen_secs: float
+    url: str,
+    input_wav: Path,
+    output_wav: Path,
+    listen_secs: float,
+    token: str | None,
+    trailing_silence_secs: float,
 ) -> None:
     pcm_in = _read_wav_pcm(input_wav)
-    print(f"streaming {len(pcm_in)} bytes of PCM over {url}")
+    if token:
+        sep = "&" if "?" in url else "?"
+        url = f"{url}{sep}token={token}"
+    print(f"streaming {len(pcm_in)} bytes of PCM over {url.split('?')[0]}")
 
     async with websockets.connect(url) as ws:
         # Send the utterance in CHUNK_MS chunks, pacing roughly real-time.
         for i in range(0, len(pcm_in), CHUNK_BYTES):
             await ws.send(pcm_in[i : i + CHUNK_BYTES])
+            await asyncio.sleep(CHUNK_MS / 1000.0)
+
+        # Emulate a real mic going quiet: keep streaming silence so the server's
+        # VAD (vad_stop_secs) / SmartTurn detect end-of-speech and run the turn.
+        # Without this the utterance never endpoints and no reply comes back.
+        silence = bytes(CHUNK_BYTES)
+        for _ in range(int(trailing_silence_secs * 1000 / CHUNK_MS)):
+            await ws.send(silence)
             await asyncio.sleep(CHUNK_MS / 1000.0)
 
         # Then listen for response audio frames until quiet for listen_secs.
@@ -89,9 +105,30 @@ def main() -> None:
         default=8.0,
         help="seconds of silence after last recv before closing",
     )
+    parser.add_argument(
+        "--token",
+        default=None,
+        help="shared session auth token (spec #016); sent as ?token= query param",
+    )
+    parser.add_argument(
+        "--trailing-silence-secs",
+        type=float,
+        default=2.0,
+        help="silence streamed after the utterance so the server endpoints the "
+        "turn (must exceed vad_stop_secs; default 2.0)",
+    )
     args = parser.parse_args()
 
-    asyncio.run(_stream(args.url, args.input_wav, args.output_wav, args.listen_secs))
+    asyncio.run(
+        _stream(
+            args.url,
+            args.input_wav,
+            args.output_wav,
+            args.listen_secs,
+            args.token,
+            args.trailing_silence_secs,
+        )
+    )
 
 
 if __name__ == "__main__":

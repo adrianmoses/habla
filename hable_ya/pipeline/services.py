@@ -1,11 +1,18 @@
-"""Pipeline-wide shared services (STT, LLM, TTS).
+"""Pipecat services (STT, LLM, TTS).
 
-Constructed once at process startup and reused across WebSocket sessions.
-Call `load_services(settings)` from a FastAPI `lifespan` context, then call
-`warmup_llm(settings)` to confirm the Anthropic API accepts a request before
-flipping the app to ready.
+Two entry points (spec #016):
+- `load_services(settings)` — build the shared instances once in the FastAPI
+  `lifespan`, used only for startup warmup + health probes.
+- `build_session_services(settings)` — build a *fresh* set per WebSocket session.
+  Each session owns its LLM/STT/TTS so the per-session `log_turn` handler (bound
+  via `register_function` on the LLM) and the Cartesia per-context websocket
+  cannot be clobbered by a concurrent connection. Cheap: HTTP/websocket clients,
+  no model load.
 
-All three services are now managed APIs: Claude (LLM, spec 001), OpenAI
+Call `warmup_llm(settings)` after `load_services` to confirm the Anthropic API
+accepts a request before flipping the app to ready.
+
+All three services are managed APIs: Claude (LLM, spec 001), OpenAI
 transcription (STT) and Cartesia (TTS) (spec 007). Only the small Silero VAD +
 SmartTurn ONNX models remain local (CPU), so the model path needs no GPU.
 """
@@ -33,21 +40,19 @@ class Services:
     tts: CartesiaTTSService
 
 
-def load_services(settings: Settings) -> Services:
-    logger.info("Loading Pipecat services")
+def build_session_services(settings: Settings) -> Services:
+    """Construct a fresh STT/LLM/TTS set. Quiet — called per session."""
     stt = OpenAISTTService(
         api_key=settings.openai_api_key,
         model=settings.stt_model,
         language=Language.ES,
     )
-    logger.info("  OpenAI STT ready (%s)", settings.stt_model)
-
     # Thinking is disabled: a real-time voice turn must not stall on a
     # reasoning pass. This is the Claude analog of the on-device Gemma
-    # `enable_thinking=false` chat-template hack. `HABLE_YA_TOOLS_SCHEMA` is
-    # attached per session on the LLMContext (see api/routes/session.py), and
-    # the `log_turn` handler is registered there too, so tools live with the
-    # per-session state rather than on this shared service.
+    # `enable_thinking=false` chat-template hack. The `HABLE_YA_TOOLS_SCHEMA`
+    # and the `log_turn` handler are attached per session (see
+    # api/routes/session.py) — and, since this instance is per session, that
+    # registration cannot be clobbered by a concurrent connection.
     llm = AnthropicLLMService(
         api_key=settings.anthropic_api_key,
         model=settings.llm_model_name,
@@ -57,8 +62,6 @@ def load_services(settings: Settings) -> Services:
             thinking=AnthropicLLMService.ThinkingConfig(type="disabled"),
         ),
     )
-    logger.info("  LLM service ready (%s)", settings.llm_model_name)
-
     tts = CartesiaTTSService(
         api_key=settings.cartesia_api_key,
         voice_id=settings.cartesia_voice_id,
@@ -66,13 +69,21 @@ def load_services(settings: Settings) -> Services:
         sample_rate=settings.audio_sample_rate,
         params=CartesiaTTSService.InputParams(language=Language.ES),
     )
+    return Services(stt=stt, llm=llm, tts=tts)
+
+
+def load_services(settings: Settings) -> Services:
+    """Build the shared instances for startup warmup + health probes."""
+    logger.info("Loading Pipecat services")
+    services = build_session_services(settings)
+    logger.info("  OpenAI STT ready (%s)", settings.stt_model)
+    logger.info("  LLM service ready (%s)", settings.llm_model_name)
     logger.info(
         "  Cartesia TTS ready (%s, voice %s)",
         settings.cartesia_model,
         settings.cartesia_voice_id or "<unset>",
     )
-
-    return Services(stt=stt, llm=llm, tts=tts)
+    return services
 
 
 async def warmup_llm(settings: Settings) -> None:

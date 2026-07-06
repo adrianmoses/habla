@@ -34,6 +34,9 @@ def _patched_app(db_reachable: bool = True) -> Iterator[TestClient]:
     with (
         patch("api.main.load_services", _fake_load_services),
         patch("api.main.warmup_llm", _noop_warmup),
+        # Test settings have no real cloud keys; the #016 startup fail-fast is
+        # covered directly in test_session_auth, so no-op it here.
+        patch("api.main.require_cloud_secrets", lambda _cfg: None),
         patch("api.main.upgrade_to_head", AsyncMock(return_value=None)),
         patch("api.main.open_pool", AsyncMock(return_value=fake_pool)),
         patch("api.main.close_pool", AsyncMock(return_value=None)),
@@ -76,6 +79,37 @@ def test_health_returns_503_when_db_unreachable() -> None:
         assert response.status_code == 503
         body = response.json()
         assert body["status"] == "db_unreachable"
+
+
+def test_health_degraded_when_provider_error_recent() -> None:
+    import time
+
+    with _patched_app() as client:
+        from api.main import app
+
+        app.state.provider_errors = {"anthropic": time.monotonic()}
+        response = client.get("/health")
+        assert response.status_code == 503
+        body = response.json()
+        assert body["status"] == "degraded"
+        assert "anthropic" in body["providers"]
+
+
+def test_health_ok_when_provider_error_expired() -> None:
+    import time
+
+    from api.routes.health import PROVIDER_ERROR_WINDOW_SECS
+
+    with _patched_app() as client:
+        from api.main import app
+
+        # An error older than the window no longer degrades health.
+        app.state.provider_errors = {
+            "openai": time.monotonic() - PROVIDER_ERROR_WINDOW_SECS - 1
+        }
+        response = client.get("/health")
+        assert response.status_code == 200
+        assert response.json()["status"] == "ok"
 
 
 def test_ws_session_refused_while_warming_up() -> None:
