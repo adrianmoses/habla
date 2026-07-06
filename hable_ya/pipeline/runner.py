@@ -138,5 +138,7 @@ def build_pipeline_task(
             audio_out_sample_rate=settings.audio_sample_rate,
         ),
         observers=build_observers(settings),
-        idle_timeout_secs=None,
+        # Reap half-open/abandoned sessions without needing a new connection to
+        # evict them (spec #016).
+        idle_timeout_secs=settings.session_idle_timeout_secs,
     )

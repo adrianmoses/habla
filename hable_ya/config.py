@@ -69,6 +69,20 @@ class Settings(BaseSettings):
     dev_endpoints_enabled: bool = False
     latency_debug: bool = False
 
+    # Session auth & single-session enforcement (spec #016).
+    # Shared secret gating /ws/session. Fail-closed: if this is empty and
+    # session_auth_disabled is False, the endpoint refuses all connections.
+    # Set session_auth_disabled=True only for local dev (mirrors
+    # dev_endpoints_enabled). Presence is checked at startup, not here, so
+    # tests can construct Settings() without it.
+    session_auth_token: str = Field(
+        default="", validation_alias="HABLE_YA_SESSION_AUTH_TOKEN"
+    )
+    session_auth_disabled: bool = False
+    # No-audio idle timeout after which a session's PipelineTask self-terminates,
+    # reaping half-open connections without needing a new one to evict them.
+    session_idle_timeout_secs: float = 300.0
+
     # Learner-model (spec 029) tunables.
     profile_window_turns: int = 20  # rolling window for L1_reliance / fluency
     profile_top_errors: int = 3  # top-N error categories surfaced in prompt

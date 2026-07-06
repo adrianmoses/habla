@@ -251,3 +251,6 @@ finetuned_v2.json
 # Runtime observation sink (spec 023; replaced by persistence in #026)
 runtime_turns.jsonl
 
+# Local test audio (scripts/make_test_wav.py output, voice_client.py in/out)
+*.wav
+
