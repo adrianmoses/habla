@@ -2,8 +2,10 @@
 
 Reads a 16 kHz mono WAV, streams PCM frames over the WebSocket, writes the
 response audio back to a WAV file. Run against a live `uvicorn api.main:app`
-with llama.cpp up. Intended for human validation — not part of the pytest
-suite.
+with the three cloud API keys set (ANTHROPIC_API_KEY, OPENAI_API_KEY,
+CARTESIA_API_KEY + CARTESIA_VOICE_ID) — no local model server. Intended for
+human validation — not part of the pytest suite. Set HABLE_YA_LATENCY_DEBUG=true
+to log per-stage TTFB (spec #013).
 
 Usage:
     python scripts/voice_client.py input.wav output.wav [--url ws://host:port/ws/session]

@@ -47,7 +47,18 @@ class Settings(BaseSettings):
     cartesia_voice_id: str = Field(default="", validation_alias="CARTESIA_VOICE_ID")
     cartesia_model: str = "sonic-3"
 
-    smart_turn_stop_secs: float = 4.0
+    # Turn-taking, re-tuned for the cloud hop (spec #013). The measured cloud
+    # network floor is ~2.05s p50 / ~3.0s p95 (STT ~711ms + LLM TTFT ~1179ms +
+    # TTS TTFB ~161ms, p50), so no endpointing value hits the p50≤1.5s target —
+    # the lever here is only to not add to that floor.
+    #   smart_turn: SmartTurn v3's *max* silence before force-ending an utterance
+    #   it's still uncertain about. It only bites on trailing/uncertain turns —
+    #   common when a learner pauses to think — so it was the on-device
+    #   carry-over (4.0s) to trim, cut to 3.0s: reclaims 1s on the uncertain-turn
+    #   tail while keeping a generous learner-pause cushion.
+    #   vad: kept at 0.5s (reviewed, unchanged) — already reasonable; lowering it
+    #   risks treating a learner's mid-sentence pause as end-of-turn.
+    smart_turn_stop_secs: float = 3.0
     vad_stop_secs: float = 0.5
 
     audio_sample_rate: int = 16000
