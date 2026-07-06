@@ -204,7 +204,8 @@ The llama.cpp GPU server and the HuggingFace-gated Gemma download were removed i
 **Model constraints (from `hable_ya/config.py`)**
 - LLM: Claude `claude-sonnet-4-6` via `AnthropicLLMService`; `llm_max_tokens = 1024` (room for a short spoken reply + native `log_turn` args); thinking disabled for voice latency.
 - STT: OpenAI `gpt-4o-transcribe`, Spanish; TTS: Cartesia `sonic-3` with an owner-supplied `cartesia_voice_id`.
-- CPU-only app container; no GPU reservation, no local model server. Network round-trip latency for the added cloud hop is re-benchmarked in #013.
+- CPU-only app container; no GPU reservation, no local model server.
+- **Latency floor (measured, #013 — `scripts/benchmark_latency.py`, 20 iters):** per-stage TTFB p50/p95 ms — STT 711/1229, LLM TTFT 1179/1581, TTS 161/204; summed network floor ≈ 2.05s p50 / 3.0s p95, *before* the endpointing wait. This exceeds the p50≤1.5s / p95≤2.5s target on the network legs alone (dominated by LLM TTFT + STT), so endpointing was re-tuned only to not add to the floor: `smart_turn_stop_secs` 4.0→3.0 (trim the on-device carry-over ceiling; still bites only on uncertain/trailing learner turns), `vad_stop_secs` kept at 0.5. Getting under the target needs faster STT/LLM or streaming-partial STT — out of #013 scope.
 
 **Pedagogical constraints (scoring thresholds in `eval/compare.py`, forbidden phrases in the runtime prompt under `hable_ya/pipeline/prompts/`)**
 - `recast_present ≥ 0.70`, `recast_explicit ≤ 0.20`, `register_correct ≥ 0.70`, `L1_in_response ≤ 0.15`, `sentence_count_ok ≥ 0.75`, `question_count_ok ≥ 0.80`, `error_repeated ≤ 0.05`.
