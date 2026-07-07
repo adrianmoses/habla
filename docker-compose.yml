@@ -8,10 +8,18 @@ services:
     environment:
       # Override the .env default (localhost) so in-compose runs reach the db
       # service by its compose hostname. On-host runs (uv run uvicorn …) still
-      # use the .env value.
-      HABLE_YA_DATABASE_URL: postgresql://hable_ya:hable_ya@db:5432/hable_ya
+      # use the .env value. Creds default to the dev placeholder but can be
+      # overridden via POSTGRES_* env; the prod overlay injects real values.
+      HABLE_YA_DATABASE_URL: postgresql://${POSTGRES_USER:-hable_ya}:${POSTGRES_PASSWORD:-hable_ya}@db:5432/${POSTGRES_DB:-hable_ya}
+      # Local dev uses the placeholder DB password → opt out of the #017
+      # secure-credential fail-fast. The prod overlay sets this false.
+      HABLE_YA_ALLOW_DEFAULT_DB_CREDENTIALS: "true"
     volumes:
-      - ./data:/app/data
+      # Named volume (not a host bind): the app now runs as non-root (uid 10001)
+      # and a fresh named volume inherits the image's app-owned /app/data, so the
+      # observation sink can write runtime_turns.jsonl. Inspect turn logs with:
+      #   docker compose exec app cat /app/data/runtime_turns.jsonl
+      - appdata:/app/data
     depends_on:
       db:
         condition: service_healthy
@@ -24,19 +32,22 @@ services:
       # its `db` hostname on 5432 (see app.environment override).
       - "5433:5432"
     environment:
-      POSTGRES_USER: hable_ya
-      POSTGRES_PASSWORD: hable_ya
-      POSTGRES_DB: hable_ya
+      POSTGRES_USER: ${POSTGRES_USER:-hable_ya}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hable_ya}
+      POSTGRES_DB: ${POSTGRES_DB:-hable_ya}
     volumes:
       # PG18 convention: mount at /var/lib/postgresql (base dir), not the
       # legacy /var/lib/postgresql/data. The image stores data under
       # <base>/<major>/docker/ so pg_upgrade can work in place.
       - pgdata:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U hable_ya -d hable_ya"]
+      # $$ escapes to a literal $ so the container shell expands the vars set
+      # from POSTGRES_USER/DB — keeps working when creds are overridden.
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
       interval: 5s
       timeout: 3s
       retries: 10
 
 volumes:
   pgdata:
+  appdata:

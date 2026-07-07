@@ -1,0 +1,77 @@
+# Production overlay — layer OVER the base file, which stays dev-friendly,
+# TLS-free, and host-published:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Requires Docker Compose v2.24.4+ for the `!reset` / `!override` merge tags
+# (ports and volumes otherwise MERGE by concatenation across files, so a base
+# host-publish can't be removed from an overlay without an explicit reset).
+#
+# Required env (host env or a project-level .env in this directory):
+#   POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB  — DB credentials (no defaults)
+#   DOMAIN                                         — public hostname for TLS
+#   ACME_EMAIL                                     — Let's Encrypt account email
+# Plus the app's own provider secrets (ANTHROPIC/OPENAI/CARTESIA keys +
+# CARTESIA_VOICE_ID + HABLE_YA_SESSION_AUTH_TOKEN) via the app service `env_file`.
+
+services:
+  app:
+    # Pull the published image instead of building on the host.
+    image: ghcr.io/adrianmoses/habla:latest
+    build: !reset null            # force pull-only in prod
+    pull_policy: always
+    restart: unless-stopped
+    # `ports` merges by concatenation across compose files, so removing the base
+    # 8000:8000 host publish requires an explicit reset. Traffic enters only via
+    # Caddy on the internal network.
+    ports: !reset []
+    environment:
+      # Real DB credential injected (no hardcoded hable_ya:hable_ya). `:?` makes
+      # compose refuse to start when unset. This overrides the base override.
+      HABLE_YA_DATABASE_URL: postgresql://${POSTGRES_USER:?}:${POSTGRES_PASSWORD:?}@db:5432/${POSTGRES_DB:?}
+      # environment maps MERGE across compose files, so explicitly turn the base's
+      # dev opt-out back off — the #017 secure-credential fail-fast is active in prod.
+      HABLE_YA_ALLOW_DEFAULT_DB_CREDENTIALS: "false"
+    # Same named volume as the base (declared below) — persists the turns sink.
+    deploy:
+      resources:
+        limits:
+          # CPU-only: the only local compute is per-frame Silero VAD + SmartTurn
+          # ONNX; STT/LLM/TTS are cloud APIs. Tune against a live session.
+          cpus: "2.0"
+          memory: 2G
+        reservations:
+          memory: 512M
+    # The image HEALTHCHECK (urllib → /health) is reused; caddy depends on it.
+
+  db:
+    restart: unless-stopped
+    ports: !reset []              # internal-only; Postgres not reachable from host
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_DB: ${POSTGRES_DB:?}
+    # pgdata volume + pg_isready healthcheck inherited from the base unchanged.
+
+  caddy:                          # NEW — prod overlay only; absent from base file
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    ports:
+      - "80:80"                   # ACME HTTP-01 challenge + HTTP→HTTPS redirect
+      - "443:443"                 # wss:// and https://
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN to your public hostname}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL for Let's Encrypt}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data          # ACME account key + issued certs — MUST persist
+      - caddy_config:/config
+
+volumes:
+  # `appdata` + `pgdata` are declared in the base file; re-declaring the ones
+  # this overlay introduces. Compose unions volume declarations across files.
+  caddy_data:
+  caddy_config:
