@@ -15,6 +15,14 @@ class Settings(BaseSettings):
     model_config = {"env_prefix": "HABLE_YA_"}
 
     database_url: str = "postgresql://hable_ya:hable_ya@localhost:5433/hable_ya"
+    # Deployment hardening (spec #017). The default DSN ships the placeholder
+    # `hable_ya:hable_ya` credential, which is fine for local dev but must never
+    # reach production. At startup the serving path rejects an empty or
+    # placeholder DB password unless this dev opt-out is set (mirrors #016's
+    # session_auth_disabled). The base compose sets it true; the prod overlay
+    # sets it false and injects a real credential. Checked in the lifespan, not a
+    # Settings validator, so keyless CI `Settings()` construction still works.
+    allow_default_db_credentials: bool = False
     db_pool_min_size: int = 1
     db_pool_max_size: int = 4
     db_pool_timeout_seconds: float = 5.0

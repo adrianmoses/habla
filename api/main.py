@@ -12,6 +12,7 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI
 
@@ -56,11 +57,39 @@ def require_cloud_secrets(cfg: Settings) -> None:
         )
 
 
+# The placeholder DB password baked into the default DSN + the docker-compose
+# dev defaults. Safe locally; a boot-time error in production.
+_PLACEHOLDER_DB_PASSWORD = "hable_ya"
+
+
+def require_secure_db_credentials(cfg: Settings) -> None:
+    """Fail fast on an empty or placeholder DB password (spec #017).
+
+    Defense-in-depth behind the prod compose's `${POSTGRES_PASSWORD:?}` gate: if
+    the app is ever started with the shipped `hable_ya:hable_ya` default (or a
+    passwordless DSN), refuse to boot. `allow_default_db_credentials` is the dev
+    opt-out (base compose sets it true); the prod overlay leaves it false. Like
+    `require_cloud_secrets`, this lives on the serving path, not in a `Settings`
+    validator, so keyless CI `Settings()` construction is unaffected.
+    """
+    if cfg.allow_default_db_credentials:
+        return
+    password = urlsplit(cfg.database_url).password
+    if not password or password == _PLACEHOLDER_DB_PASSWORD:
+        raise RuntimeError(
+            "Insecure database credentials: the DB password is empty or the "
+            f"placeholder '{_PLACEHOLDER_DB_PASSWORD}'. Inject a real "
+            "POSTGRES_PASSWORD, or set HABLE_YA_ALLOW_DEFAULT_DB_CREDENTIALS=true "
+            "for local development."
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.ready = False
     app.state.settings = settings
     require_cloud_secrets(settings)
+    require_secure_db_credentials(settings)
     if not settings.session_auth_token and not settings.session_auth_disabled:
         logger.error(
             "HABLE_YA_SESSION_AUTH_TOKEN is unset and session_auth_disabled is "
