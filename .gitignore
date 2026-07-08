@@ -254,3 +254,6 @@ runtime_turns.jsonl
 # Local test audio (scripts/make_test_wav.py output, voice_client.py in/out)
 *.wav
 
+
+# Local DB backups (scripts/backup_db.sh)
+backups/

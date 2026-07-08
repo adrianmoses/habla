@@ -1,0 +1,13 @@
+# Caddy reverse proxy for the prod overlay (docker-compose.prod.yml).
+# Automatic ACME TLS for $DOMAIN; terminates wss:// and https:// at the edge and
+# forwards plain ws://app:8000 internally. Caddy upgrades WebSocket connections
+# transparently (it forwards the Upgrade/Connection headers), so no ws-specific
+# config is needed. Requires public DNS for $DOMAIN pointing at this host with
+# ports 80 + 443 reachable.
+{
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	reverse_proxy app:8000
+}

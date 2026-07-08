@@ -34,9 +34,11 @@ def _patched_app(db_reachable: bool = True) -> Iterator[TestClient]:
     with (
         patch("api.main.load_services", _fake_load_services),
         patch("api.main.warmup_llm", _noop_warmup),
-        # Test settings have no real cloud keys; the #016 startup fail-fast is
-        # covered directly in test_session_auth, so no-op it here.
+        # Test settings have no real cloud keys and use the placeholder DB DSN;
+        # the #016/#017 startup fail-fasts are covered directly in
+        # test_session_auth / test_deploy_hardening, so no-op them here.
         patch("api.main.require_cloud_secrets", lambda _cfg: None),
+        patch("api.main.require_secure_db_credentials", lambda _cfg: None),
         patch("api.main.upgrade_to_head", AsyncMock(return_value=None)),
         patch("api.main.open_pool", AsyncMock(return_value=fake_pool)),
         patch("api.main.close_pool", AsyncMock(return_value=None)),
