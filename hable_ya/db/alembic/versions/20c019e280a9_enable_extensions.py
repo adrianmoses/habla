@@ -22,9 +22,14 @@ def upgrade() -> None:
     # runs this on every pool release) falls back to a path that still
     # resolves `ag_catalog` unqualified. Without this, the init-callback
     # `SET search_path` only survives until the first release-to-pool.
-    op.execute('ALTER ROLE hable_ya SET search_path = ag_catalog, "$user", public;')
+    #
+    # Use CURRENT_USER rather than a hardcoded role name: the connecting role
+    # is whatever POSTGRES_USER injects (the dev placeholder `hable_ya`, or a
+    # real injected credential in prod). Hardcoding `hable_ya` made this
+    # migration fail with `role "hable_ya" does not exist` under prod creds.
+    op.execute('ALTER ROLE CURRENT_USER SET search_path = ag_catalog, "$user", public;')
 
 
 def downgrade() -> None:
-    op.execute("ALTER ROLE hable_ya RESET search_path;")
+    op.execute("ALTER ROLE CURRENT_USER RESET search_path;")
     op.execute("DROP EXTENSION IF EXISTS age;")
