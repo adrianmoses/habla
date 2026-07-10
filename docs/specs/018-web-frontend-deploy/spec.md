@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | id | 018 |
-| status | in-progress |
+| status | implemented |
 | created | 2026-07-10 |
 
 > **Open Questions resolved (2026-07-10, operator = recommended options):**
