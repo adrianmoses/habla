@@ -54,7 +54,11 @@ services:
     # pgdata volume + pg_isready healthcheck inherited from the base unchanged.
 
   caddy:                          # NEW — prod overlay only; absent from base file
-    image: caddy:2
+    # Custom Caddy image with the built SPA baked in at /srv (spec #018,
+    # web/Dockerfile). Published by release.yml alongside the app image; pull
+    # the matching tag rather than building on the host.
+    image: ghcr.io/adrianmoses/habla-web:latest
+    pull_policy: always
     restart: unless-stopped
     depends_on:
       app:

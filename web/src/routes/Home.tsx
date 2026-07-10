@@ -7,6 +7,7 @@ import {
   MicIcon,
 } from '../components/icons';
 import { useHealth } from '../lib/health';
+import { getSessionToken, setSessionToken } from '../lib/token';
 
 type Props = {
   onStart: () => void;
@@ -32,6 +33,20 @@ export default function Home({ onStart, error }: Props) {
   const [toast, setToast] = useState(false);
   const [time] = useState(greeting);
   const health = useHealth();
+
+  // Session-auth token (spec #018, OQ1 Option B): pasted once by the operator,
+  // kept in sessionStorage — never baked into the bundle. The CTA stays disabled
+  // until a token is present; `VoiceClient` reads it at connect time.
+  const [tokenDraft, setTokenDraft] = useState('');
+  const [hasToken, setHasToken] = useState(() => getSessionToken() !== undefined);
+
+  const saveToken = () => {
+    const t = tokenDraft.trim();
+    if (!t) return;
+    setSessionToken(t);
+    setTokenDraft('');
+    setHasToken(true);
+  };
 
   const ready = health === 'ready';
   const warming = health === 'warming' || health === 'unknown';
@@ -191,6 +206,81 @@ export default function Home({ onStart, error }: Props) {
             </div>
           )}
 
+          {!hasToken ? (
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 10,
+                maxWidth: 520,
+              }}
+            >
+              <label
+                style={{
+                  fontFamily: 'var(--mono)',
+                  fontSize: 11,
+                  letterSpacing: '0.12em',
+                  textTransform: 'uppercase',
+                  color: 'var(--muted)',
+                }}
+              >
+                Token de acceso
+              </label>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <input
+                  type="password"
+                  value={tokenDraft}
+                  onChange={(e) => setTokenDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') saveToken();
+                  }}
+                  placeholder="Pega el token del servidor…"
+                  autoComplete="off"
+                  style={{
+                    flex: 1,
+                    padding: '14px 16px',
+                    borderRadius: 12,
+                    border: '1px solid var(--line)',
+                    background: 'var(--cream-2)',
+                    color: 'var(--ink)',
+                    fontFamily: 'var(--mono)',
+                    fontSize: 13,
+                    outline: 'none',
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={saveToken}
+                  disabled={!tokenDraft.trim()}
+                  style={{
+                    padding: '14px 22px',
+                    borderRadius: 12,
+                    border: 'none',
+                    background: tokenDraft.trim()
+                      ? 'var(--ink)'
+                      : 'var(--muted)',
+                    color: 'var(--cream)',
+                    fontFamily: 'var(--sans)',
+                    fontSize: 14,
+                    fontWeight: 500,
+                    cursor: tokenDraft.trim() ? 'pointer' : 'not-allowed',
+                  }}
+                >
+                  Guardar
+                </button>
+              </div>
+              <div
+                style={{
+                  fontSize: 12,
+                  color: 'var(--muted)',
+                  fontFamily: 'var(--mono)',
+                  letterSpacing: '0.04em',
+                }}
+              >
+                Se guarda solo en esta pestaña · no se envía a ningún tercero.
+              </div>
+            </div>
+          ) : (
           <button
             type="button"
             disabled={!ready}
@@ -257,6 +347,7 @@ export default function Home({ onStart, error }: Props) {
               style={{ marginLeft: 24, opacity: 0.8 }}
             />
           </button>
+          )}
 
           <div
             style={{

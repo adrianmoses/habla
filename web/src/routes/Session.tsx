@@ -4,6 +4,7 @@ import OrbHalo from '../components/orb/OrbHalo';
 import { CloseIcon, MicIcon, PauseIcon, PlayIcon } from '../components/icons';
 import { VoiceClient } from '../voice/client';
 import { useAmplitude } from '../voice/amplitude';
+import { clearSessionToken, getSessionToken } from '../lib/token';
 
 type ExitReason = 'user' | 'error';
 
@@ -31,8 +32,15 @@ export default function Session({ onExit }: Props) {
 
   useEffect(() => {
     const c = new VoiceClient({
+      token: getSessionToken(),
       onClose: (ev) => {
         if (ev.code === 1000) return;
+        if (ev.code === 1008) {
+          // Rejected token — drop the stale secret so Home re-prompts.
+          clearSessionToken();
+          onExit('error', 'Token inválido — vuelve a ingresarlo');
+          return;
+        }
         onExit(
           'error',
           ev.code === 1013
