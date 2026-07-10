@@ -1,0 +1,8 @@
+# Keep the build context lean and reproducible: never ship a host-built
+# node_modules/dist into the image (npm ci + vite build regenerate them).
+node_modules
+dist
+.DS_Store
+*.log
+Dockerfile
+.dockerignore

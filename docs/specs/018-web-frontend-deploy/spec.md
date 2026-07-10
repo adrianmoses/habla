@@ -3,8 +3,18 @@
 | Field | Value |
 |---|---|
 | id | 018 |
-| status | planned |
+| status | in-progress |
 | created | 2026-07-10 |
+
+> **Open Questions resolved (2026-07-10, operator = recommended options):**
+> **OQ1** → Option B (paste-once token in `sessionStorage`, never bundled) + the
+> **`Sec-WebSocket-Protocol` subprotocol** transport (no `?token=`;
+> `token_urlsafe` chars are valid subprotocol tokens). **OQ2** → Option A (Caddy
+> `file_server` serves `dist/`; `/ws/session*` + `/health` stay reverse-proxied
+> via mutually-exclusive `handle` blocks). **OQ3** → a custom Caddy+SPA image
+> (`web/Dockerfile`) built + pushed by `release.yml` as `<repo>-web`. **OQ4** →
+> confirmed no hardcoded `localhost`; `defaultWsUrl()` derives `wss://` from
+> `location`. No server-side change.
 
 ---
 

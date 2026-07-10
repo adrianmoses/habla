@@ -1,13 +1,31 @@
-# Caddy reverse proxy for the prod overlay (docker-compose.prod.yml).
-# Automatic ACME TLS for $DOMAIN; terminates wss:// and https:// at the edge and
-# forwards plain ws://app:8000 internally. Caddy upgrades WebSocket connections
-# transparently (it forwards the Upgrade/Connection headers), so no ws-specific
-# config is needed. Requires public DNS for $DOMAIN pointing at this host with
-# ports 80 + 443 reachable.
+# Caddy reverse proxy + static SPA host for the prod overlay
+# (docker-compose.prod.yml). Automatic ACME TLS for $DOMAIN; terminates wss://
+# and https:// at the edge. Requires public DNS for $DOMAIN pointing at this
+# host with ports 80 + 443 reachable.
+#
+# The built SPA (spec #018) is baked into this Caddy image at /srv (see
+# web/Dockerfile). Routing uses mutually-exclusive `handle` blocks so the static
+# file_server can never shadow the WebSocket upgrade or the health probe:
+#   - /ws/session*  → reverse_proxy app:8000 (Caddy forwards Upgrade/Connection
+#                     and Sec-WebSocket-Protocol transparently, so the #016
+#                     subprotocol auth token reaches the app unchanged).
+#   - /health       → reverse_proxy app:8000 (readiness probe, spec #016).
+#   - everything else → serve the SPA, with a history-API fallback to
+#                     index.html so client-side routes (/, /session) don't 404.
 {
 	email {$ACME_EMAIL}
 }
 
 {$DOMAIN} {
-	reverse_proxy app:8000
+	handle /ws/session* {
+		reverse_proxy app:8000
+	}
+	handle /health {
+		reverse_proxy app:8000
+	}
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
 }

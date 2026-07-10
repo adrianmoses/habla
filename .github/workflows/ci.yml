@@ -80,3 +80,30 @@ jobs:
       # llama.cpp band-emission regression (hable-ya spec 049). It's dropped
       # here — replay_placement.py targets a llama.cpp endpoint that no longer
       # exists. A cloud eval-regression gate is #012's job.
+
+  # Frontend build gate (spec #018). Independent of the Python `checks` job so a
+  # web-only change is exercised on PRs without spinning up Postgres. Runs the
+  # same `npm run build` (= tsc --noEmit && vite build) the release image runs.
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Build (typecheck + vite build)
+        run: npm run build

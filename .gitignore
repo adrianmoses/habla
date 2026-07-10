@@ -14,8 +14,12 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+# Anchor Python packaging dirs to the repo root — a bare `lib/`/`lib64/` matches
+# ANY nested dir of that name and was silently swallowing the frontend's
+# `web/src/lib/` (why web/src/lib/health.ts was never committed, breaking the SPA
+# build on a fresh checkout — spec #018).
+/lib/
+/lib64/
 parts/
 sdist/
 var/

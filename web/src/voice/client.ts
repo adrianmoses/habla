@@ -11,6 +11,7 @@ export type VoiceStatus = 'idle' | 'connecting' | 'connected' | 'closed' | 'erro
 
 export type VoiceClientOpts = {
   wsUrl?: string;
+  token?: string;
   onStatus?: (status: VoiceStatus) => void;
   onClose?: (ev: CloseEvent) => void;
   onError?: (err: unknown) => void;
@@ -24,6 +25,7 @@ function defaultWsUrl(): string {
 
 export class VoiceClient {
   private readonly wsUrl: string;
+  private readonly token?: string;
   private readonly onStatus?: (s: VoiceStatus) => void;
   private readonly onClose?: (ev: CloseEvent) => void;
   private readonly onError?: (err: unknown) => void;
@@ -48,6 +50,7 @@ export class VoiceClient {
 
   constructor(opts: VoiceClientOpts = {}) {
     this.wsUrl = opts.wsUrl ?? defaultWsUrl();
+    this.token = opts.token;
     this.onStatus = opts.onStatus;
     this.onClose = opts.onClose;
     this.onError = opts.onError;
@@ -120,9 +123,16 @@ export class VoiceClient {
     this.playbackGain = playbackGain;
     this._playbackAnalyser = playbackAnalyser;
 
-    // WebSocket
+    // WebSocket. When a session token is present, offer it as the sole
+    // `Sec-WebSocket-Protocol` value: the server (spec #016) reads the first
+    // offered subprotocol as the auth token and echoes it on accept. This keeps
+    // the secret out of the URL and access logs (vs. a `?token=` query param).
+    // `token_urlsafe` tokens are valid subprotocol tokens (base64url chars).
+    // With no token (dev, `session_auth_disabled`) we open a bare socket.
     this.log(`connecting to ${this.wsUrl}…`);
-    const ws = new WebSocket(this.wsUrl);
+    const ws = this.token
+      ? new WebSocket(this.wsUrl, [this.token])
+      : new WebSocket(this.wsUrl);
     ws.binaryType = 'arraybuffer';
     this.ws = ws;
 
