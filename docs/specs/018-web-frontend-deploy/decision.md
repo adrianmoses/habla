@@ -227,8 +227,11 @@ GET /ws/session       status=502          # routed to proxy, NOT static-shadowed
 no token-like literals in web/src
 ```
 
-**Deferred (require a public domain + real provider keys — spec's Medium-confidence
-live spikes):** the served page driving one full authenticated STT→Claude→Cartesia
-turn over real `wss://` through Caddy, and the same serve-plus-upgrade coexistence
-over real TLS. The local HTTP run above exercised the routing/shadowing risk; only
-the TLS + live-pipeline legs remain for a human to run on a deployed host.
+**Live spike — CONFIRMED (2026-07-10, deployed host, real domain + keys).** The
+served page over real `wss://` through Caddy connected with the pasted token
+(accepted, not `1008`) and drove a full authenticated turn — María (Cartesia)
+responded, exercising the STT→Claude→Cartesia round-trip. This confirms the
+spec's Medium-confidence live spikes end-to-end on TLS: the subprotocol token
+survives Caddy's transparent `Sec-WebSocket-Protocol` forwarding, and serve +
+upgrade coexist (SPA loads, WS upgrade succeeds) with no handler shadowing. All
+acceptance criteria are now verified — nothing outstanding.
