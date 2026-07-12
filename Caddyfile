@@ -10,6 +10,8 @@
 #                     and Sec-WebSocket-Protocol transparently, so the #016
 #                     subprotocol auth token reaches the app unchanged).
 #   - /health       → reverse_proxy app:8000 (readiness probe, spec #016).
+#   - /api/*         → reverse_proxy app:8000 (learner-progress read API, spec
+#                     #019; the SPA reads it same-origin with a Bearer token).
 #   - everything else → serve the SPA, with a history-API fallback to
 #                     index.html so client-side routes (/, /session) don't 404.
 {
@@ -21,6 +23,9 @@
 		reverse_proxy app:8000
 	}
 	handle /health {
+		reverse_proxy app:8000
+	}
+	handle /api/* {
 		reverse_proxy app:8000
 	}
 	handle {

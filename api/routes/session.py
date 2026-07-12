@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import secrets
 import time
 import uuid
 from dataclasses import dataclass
@@ -34,6 +33,7 @@ from pipecat.transports.websocket.fastapi import (
     FastAPIWebsocketTransport,
 )
 
+from hable_ya.auth import authorize_token
 from hable_ya.config import Settings
 from hable_ya.pipeline.log_turn_handler import make_log_turn_handler
 from hable_ya.pipeline.prompts.builder import build_session_prompt
@@ -73,13 +73,9 @@ def _extract_token(websocket: WebSocket) -> tuple[str | None, str | None]:
 
 
 def _authorized(settings: Settings, presented: str | None) -> bool:
-    if settings.session_auth_disabled:
-        return True
-    if not settings.session_auth_token:
-        return False  # fail-closed: no secret configured
-    return presented is not None and secrets.compare_digest(
-        presented, settings.session_auth_token
-    )
+    # Thin re-export of the shared helper (spec #019 extracted it to
+    # hable_ya.auth so the /api/learner Bearer gate shares one implementation).
+    return authorize_token(settings, presented)
 
 
 def _provider_for_exception(exc: BaseException) -> str:
