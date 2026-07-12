@@ -17,6 +17,7 @@ from urllib.parse import urlsplit
 from fastapi import FastAPI
 
 from api.routes.health import router as health_router
+from api.routes.learner import router as learner_router
 from api.routes.session import router as session_router
 from hable_ya.config import Settings, settings
 from hable_ya.db import (
@@ -137,6 +138,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(title="hable-ya", lifespan=lifespan)
 app.include_router(health_router)
 app.include_router(session_router)
+app.include_router(learner_router)
 
 if settings.dev_endpoints_enabled:
     from api.routes.dev import router as dev_router  # noqa: E402

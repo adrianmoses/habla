@@ -13,13 +13,12 @@ Mounted only when ``settings.dev_endpoints_enabled`` is true.
 
 from __future__ import annotations
 
-import json
 from dataclasses import asdict
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
-from hable_ya.learner.profile import LearnerProfileRepo, is_calibrated_async
+from hable_ya.learner import read
 
 router = APIRouter()
 
@@ -43,52 +42,15 @@ async def get_observations(
 
 @router.get("/dev/learner")
 async def get_learner(request: Request) -> dict[str, Any]:
+    """Dev inspector: the production `/api/learner` payload (shared read module,
+    spec #019) reshaped under a ``profile`` key, plus the dev-only
+    ``recent_turn_bands`` per-turn trace and `band_history`."""
     pool = getattr(request.app.state, "db_pool", None)
     if pool is None:
         raise HTTPException(status_code=503, detail="db pool not ready")
-    snapshot = await LearnerProfileRepo(pool).get()
+    payload = await read.profile_payload(pool)
+    band_history = await read.band_history(pool, limit=DEV_LEARNER_BAND_HISTORY)
     async with pool.acquire() as conn:
-        is_calibrated = await is_calibrated_async(conn)
-        profile_extras = await conn.fetchrow(
-            """
-            SELECT stable_sessions_at_band, last_band_change_at
-            FROM learner_profile WHERE id = 1
-            """
-        )
-        error_rows = await conn.fetch(
-            """
-            SELECT category, count, last_seen_at
-            FROM error_counts
-            ORDER BY count DESC, last_seen_at DESC
-            LIMIT 10
-            """
-        )
-        vocab_rows = await conn.fetch(
-            """
-            SELECT lemma, production_count, last_seen_at
-            FROM vocabulary_items
-            ORDER BY last_seen_at DESC
-            LIMIT 10
-            """
-        )
-        domain_rows = await conn.fetch(
-            """
-            SELECT theme_domain, started_at
-            FROM sessions
-            WHERE theme_domain IS NOT NULL
-            ORDER BY started_at DESC
-            LIMIT 5
-            """
-        )
-        band_history_rows = await conn.fetch(
-            """
-            SELECT id, from_band, to_band, reason, signals, changed_at
-            FROM band_history
-            ORDER BY changed_at DESC
-            LIMIT $1
-            """,
-            DEV_LEARNER_BAND_HISTORY,
-        )
         recent_turn_rows = await conn.fetch(
             """
             SELECT cefr_band, timestamp
@@ -98,58 +60,15 @@ async def get_learner(request: Request) -> dict[str, Any]:
             """,
             DEV_LEARNER_RECENT_TURNS,
         )
-    stable = (
-        int(profile_extras["stable_sessions_at_band"])
-        if profile_extras is not None
-        else 0
-    )
-    last_change = (
-        profile_extras["last_band_change_at"]
-        if profile_extras is not None
-        else None
-    )
+    top_errors = payload.pop("top_errors")
+    top_vocab = payload.pop("top_vocab")
+    recent_theme_domains = payload.pop("recent_theme_domains")
     return {
-        "profile": {
-            "band": snapshot.band,
-            "sessions_completed": snapshot.sessions_completed,
-            "l1_reliance": snapshot.l1_reliance,
-            "speech_fluency": snapshot.speech_fluency,
-            "error_patterns": snapshot.error_patterns,
-            "vocab_strengths": snapshot.vocab_strengths,
-            "is_calibrated": is_calibrated,
-            "stable_sessions_at_band": stable,
-            "last_band_change_at": (
-                last_change.isoformat() if last_change is not None else None
-            ),
-        },
-        "top_errors": [
-            {
-                "category": r["category"],
-                "count": r["count"],
-                "last_seen_at": r["last_seen_at"].isoformat(),
-            }
-            for r in error_rows
-        ],
-        "top_vocab": [
-            {
-                "lemma": r["lemma"],
-                "production_count": r["production_count"],
-                "last_seen_at": r["last_seen_at"].isoformat(),
-            }
-            for r in vocab_rows
-        ],
-        "recent_theme_domains": [r["theme_domain"] for r in domain_rows],
-        "band_history": [
-            {
-                "id": r["id"],
-                "from_band": r["from_band"],
-                "to_band": r["to_band"],
-                "reason": r["reason"],
-                "signals": _signals_to_dict(r["signals"]),
-                "changed_at": r["changed_at"].isoformat(),
-            }
-            for r in band_history_rows
-        ],
+        "profile": payload,
+        "top_errors": top_errors,
+        "top_vocab": top_vocab,
+        "recent_theme_domains": recent_theme_domains,
+        "band_history": band_history,
         "recent_turn_bands": [
             {
                 "cefr_band": r["cefr_band"],
@@ -158,16 +77,3 @@ async def get_learner(request: Request) -> dict[str, Any]:
             for r in recent_turn_rows
         ],
     }
-
-
-def _signals_to_dict(raw: Any) -> dict[str, Any]:
-    """asyncpg returns JSONB as str without a registered codec; decode."""
-    if isinstance(raw, dict):
-        return raw
-    if isinstance(raw, str):
-        try:
-            decoded = json.loads(raw)
-        except json.JSONDecodeError:
-            return {}
-        return decoded if isinstance(decoded, dict) else {}
-    return {}
