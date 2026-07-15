@@ -35,6 +35,10 @@ from pipecat.transports.websocket.fastapi import (
 
 from hable_ya.auth import authorize_token
 from hable_ya.config import Settings
+from hable_ya.pipeline.conversation import (
+    ConversationConfig,
+    parse_conversation_config,
+)
 from hable_ya.pipeline.log_turn_handler import make_log_turn_handler
 from hable_ya.pipeline.prompts.builder import build_session_prompt
 from hable_ya.pipeline.runner import build_pipeline_task, default_learner
@@ -70,6 +74,19 @@ def _extract_token(websocket: WebSocket) -> tuple[str | None, str | None]:
         first = proto.split(",")[0].strip()
         return first, first
     return None, None
+
+
+def _extract_conversation_config(websocket: WebSocket) -> ConversationConfig:
+    """Parse the per-session mode/topic from the WS query string (spec 023).
+
+    Fail-safe: an unknown/blank mode or topic degrades to the open default; a
+    malformed query string never breaks the handshake. Rides alongside the
+    token extraction — orthogonal to auth.
+    """
+    return parse_conversation_config(
+        websocket.query_params.get("mode"),
+        websocket.query_params.get("topic"),
+    )
 
 
 def _authorized(settings: Settings, presented: str | None) -> bool:
@@ -167,11 +184,16 @@ async def session_ws(websocket: WebSocket) -> None:
     pool = getattr(app.state, "db_pool", None)
 
     learner = default_learner(settings)
+    conversation_config = _extract_conversation_config(websocket)
     # Resolve recent_domains from `sessions` (empty on first run); build the
-    # system prompt against the live profile + cooldown-aware theme choice.
+    # system prompt against the live profile + cooldown-aware theme choice,
+    # steered by the requested conversation mode (honoured once calibrated).
     recent_domains = await _query_recent_theme_domains(pool) if pool is not None else []
     session_prompt = await build_session_prompt(
-        learner, pool=pool, recent_domains=recent_domains
+        learner,
+        pool=pool,
+        recent_domains=recent_domains,
+        conversation_config=conversation_config,
     )
     # Register `log_turn` with the model (native tool-calling) on THIS session's
     # own LLM service, so a concurrent connection cannot overwrite the handler.
@@ -215,6 +237,7 @@ async def session_ws(websocket: WebSocket) -> None:
                 session_id=session_id,
                 theme_domain=session_prompt.theme.domain,
                 band=session_prompt.band,
+                mode=session_prompt.mode,
             )
         except Exception:
             logger.exception(

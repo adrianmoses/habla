@@ -20,8 +20,15 @@ from dataclasses import dataclass
 
 import asyncpg
 
-from eval.fixtures.schema import CEFRBand, LearnerProfile, SystemParams, Theme
+from eval.fixtures.schema import (
+    CEFRBand,
+    ConversationMode,
+    LearnerProfile,
+    SystemParams,
+    Theme,
+)
 from hable_ya.config import settings
+from hable_ya.learner.modes import build_mode_theme
 from hable_ya.learner.profile import (
     LearnerProfileRepo,
     LearnerProfileSnapshot,
@@ -30,6 +37,7 @@ from hable_ya.learner.profile import (
 )
 from hable_ya.learner.themes import NEUTRAL_THEME as _NEUTRAL_THEME
 from hable_ya.learner.themes import get_session_theme
+from hable_ya.pipeline.conversation import ConversationConfig
 from hable_ya.pipeline.prompts.register import COLD_START_INSTRUCTIONS
 from hable_ya.pipeline.prompts.render import render_system_prompt
 
@@ -39,6 +47,7 @@ class SessionPrompt:
     text: str
     theme: Theme
     band: CEFRBand
+    mode: ConversationMode = "open"
 
 
 def _neutral_profile(band: CEFRBand) -> LearnerProfile:
@@ -66,8 +75,13 @@ async def build_session_prompt(
     *,
     pool: asyncpg.Pool | None = None,
     recent_domains: list[str] | None = None,
+    conversation_config: ConversationConfig | None = None,
 ) -> SessionPrompt:
     opt_in_cold_start = bool(learner.get("cold_start"))
+    # Spec 023: the requested mode is only honoured for a calibrated learner;
+    # until then the cold-start diagnostic owns the session, so mode stays
+    # "open" and any config is dropped.
+    mode: ConversationMode = "open"
 
     if pool is None:
         band_raw = learner.get("band", "A2")
@@ -88,21 +102,32 @@ async def build_session_prompt(
         calibrated = await is_calibrated_async(pool)
         profile = snapshot_to_profile(snapshot, is_calibrated=calibrated)
         opt_in_cold_start = opt_in_cold_start or not calibrated
-        theme = (
-            _NEUTRAL_THEME
-            if not calibrated
-            else get_session_theme(
-                level=band,
-                recent_domains=recent_domains or [],
-                cooldown=settings.theme_cooldown,
-            )
-        )
+        if not calibrated:
+            theme = _NEUTRAL_THEME
+        else:
+            cfg = conversation_config or ConversationConfig()
+            mode = cfg.mode
+            if cfg.mode != "open" or cfg.topic is not None:
+                # Spec 023: a mode is just an alternative Theme factory; it
+                # fills only the Topic block, never the pedagogical blocks.
+                theme = build_mode_theme(
+                    cfg,
+                    level=band,
+                    recent_domains=recent_domains or [],
+                    cooldown=settings.theme_cooldown,
+                )
+            else:
+                theme = get_session_theme(
+                    level=band,
+                    recent_domains=recent_domains or [],
+                    cooldown=settings.theme_cooldown,
+                )
 
     params = SystemParams(profile=profile, theme=theme)
     rendered = render_system_prompt(params, band=band, tool_mode="native")
     if opt_in_cold_start:
         rendered = f"{rendered}\n\n## Primera sesión\n{COLD_START_INSTRUCTIONS}"
-    return SessionPrompt(text=rendered, theme=theme, band=band)
+    return SessionPrompt(text=rendered, theme=theme, band=band, mode=mode)
 
 
 __all__ = [
@@ -118,8 +143,12 @@ async def build_system_prompt(
     *,
     pool: asyncpg.Pool | None = None,
     recent_domains: list[str] | None = None,
+    conversation_config: ConversationConfig | None = None,
 ) -> str:
     session_prompt = await build_session_prompt(
-        learner, pool=pool, recent_domains=recent_domains
+        learner,
+        pool=pool,
+        recent_domains=recent_domains,
+        conversation_config=conversation_config,
     )
     return session_prompt.text

@@ -16,6 +16,11 @@ CEFRBand = Literal["A1", "A2", "B1", "B2", "C1"]
 Difficulty = Literal["straightforward", "ambiguous", "multi_error"]
 FluencySignal = Literal["weak", "moderate", "strong"]
 Role = Literal["assistant", "user"]
+# Spec 023: per-session conversation mode. Lives here beside CEFRBand — the
+# shared type-alias home already imported by both the pipeline and learner
+# layers — so `hable_ya.learner.ingest` can annotate it without importing
+# from the pipeline package.
+ConversationMode = Literal["open", "debate", "role_play", "interview"]
 
 
 class _Strict(BaseModel):
