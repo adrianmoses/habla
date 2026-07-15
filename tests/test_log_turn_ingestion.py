@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import asyncpg
+import pytest
 import pytest_asyncio
 
 from hable_ya.learner import graph
@@ -128,7 +129,7 @@ async def test_start_session_creates_session_row_and_scenario_edge(
     )
     async with clean_learner_state.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT theme_domain, band_at_start FROM sessions "
+            "SELECT theme_domain, band_at_start, mode FROM sessions "
             "WHERE session_id = 'sess_x'"
         )
         sessions_completed = await conn.fetchval(
@@ -137,6 +138,7 @@ async def test_start_session_creates_session_row_and_scenario_edge(
     assert row is not None
     assert row["theme_domain"] == "pedir un café"
     assert row["band_at_start"] == "A1"
+    assert row["mode"] == "open"  # spec 023: defaults to open
     assert sessions_completed == 1
 
     scenario_edges = await _count(
@@ -145,6 +147,35 @@ async def test_start_session_creates_session_row_and_scenario_edge(
         "RETURN count(*)",
     )
     assert scenario_edges == 1
+
+
+async def test_start_session_persists_explicit_mode(
+    clean_learner_state: asyncpg.Pool,
+) -> None:
+    ingest = TurnIngestService(clean_learner_state)
+    await ingest.start_session(
+        session_id="sess_debate",
+        theme_domain="debate: el teletrabajo",
+        band="B2",
+        mode="debate",
+    )
+    async with clean_learner_state.acquire() as conn:
+        mode = await conn.fetchval(
+            "SELECT mode FROM sessions WHERE session_id = 'sess_debate'"
+        )
+    assert mode == "debate"
+
+
+async def test_sessions_mode_check_rejects_invalid_value(
+    clean_learner_state: asyncpg.Pool,
+) -> None:
+    # The spec-023 migration's CHECK constrains mode to the enum set.
+    with pytest.raises(asyncpg.exceptions.CheckViolationError):
+        async with clean_learner_state.acquire() as conn:
+            await conn.execute(
+                "INSERT INTO sessions (session_id, theme_domain, band_at_start, "
+                "mode) VALUES ('sess_bad', 'x', 'A2', 'bogus')"
+            )
 
 
 async def test_end_session_sets_ended_at(clean_learner_state: asyncpg.Pool) -> None:

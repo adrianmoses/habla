@@ -131,6 +131,7 @@ async def session_history(
                 s.ended_at,
                 s.theme_domain,
                 s.band_at_start,
+                s.mode,
                 COALESCE(t.turn_count, 0) AS turn_count
             FROM sessions s
             LEFT JOIN (
@@ -153,6 +154,7 @@ async def session_history(
             ),
             "theme_domain": r["theme_domain"],
             "band_at_start": r["band_at_start"],
+            "mode": r["mode"],
             "turn_count": int(r["turn_count"]),
         }
         for r in rows

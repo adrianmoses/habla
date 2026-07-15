@@ -20,7 +20,7 @@ from datetime import UTC, datetime
 
 import asyncpg
 
-from eval.fixtures.schema import CEFRBand
+from eval.fixtures.schema import CEFRBand, ConversationMode
 from hable_ya.learner import graph
 from hable_ya.learner.errors import ErrorRepo
 from hable_ya.learner.leveling import LevelingService
@@ -82,6 +82,7 @@ class TurnIngestService:
         session_id: str,
         theme_domain: str,
         band: CEFRBand,
+        mode: ConversationMode = "open",
         at: datetime | None = None,
     ) -> None:
         when = at or datetime.now(UTC)
@@ -90,14 +91,15 @@ class TurnIngestService:
                 await conn.execute(
                     """
                     INSERT INTO sessions
-                        (session_id, started_at, theme_domain, band_at_start)
-                    VALUES ($1, COALESCE($2, now()), $3, $4)
+                        (session_id, started_at, theme_domain, band_at_start, mode)
+                    VALUES ($1, COALESCE($2, now()), $3, $4, $5)
                     ON CONFLICT (session_id) DO NOTHING
                     """,
                     session_id,
                     at,
                     theme_domain,
                     band,
+                    mode,
                 )
                 await graph.ensure_learner_node(conn)
                 await graph.link_session_to_scenario(

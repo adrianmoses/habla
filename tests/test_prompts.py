@@ -10,7 +10,8 @@ from eval.fixtures.schema import CEFRBand, LearnerProfile, SystemParams, Theme
 from hable_ya.learner.bands import ALL_BANDS as VALID_CEFR_BANDS
 from hable_ya.learner.profile import _BAND_MIDPOINT, LearnerProfileSnapshot
 from hable_ya.learner.themes import NEUTRAL_THEME as _NEUTRAL_THEME
-from hable_ya.pipeline.prompts.builder import build_system_prompt
+from hable_ya.pipeline.conversation import ConversationConfig
+from hable_ya.pipeline.prompts.builder import build_session_prompt, build_system_prompt
 from hable_ya.pipeline.prompts.register import (
     COLD_START_INSTRUCTIONS,
     REGISTER_BY_LEVEL,
@@ -311,3 +312,116 @@ async def test_pool_passes_recent_domains_to_theme_selection(
     )
     await build_system_prompt({}, pool=_FakePool(), recent_domains=["a", "b"])
     assert observed_domains == [["a", "b"]]
+
+
+# ---- Spec 023: conversation modes -----------------------------------------
+
+
+def _calibrated(monkeypatch: pytest.MonkeyPatch, band: CEFRBand = "B1") -> None:
+    """Wire the builder onto a calibrated learner at `band` (no DB)."""
+    snapshot = LearnerProfileSnapshot(band=band, sessions_completed=4)
+    mock_repo = AsyncMock()
+    mock_repo.get.return_value = snapshot
+    monkeypatch.setattr(
+        "hable_ya.pipeline.prompts.builder.LearnerProfileRepo",
+        lambda _pool: mock_repo,
+    )
+
+    async def _is_calibrated_true(_pool: object) -> bool:
+        return True
+
+    monkeypatch.setattr(
+        "hable_ya.pipeline.prompts.builder.is_calibrated_async",
+        _is_calibrated_true,
+    )
+
+
+async def test_calibrated_debate_routes_through_mode_factory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _calibrated(monkeypatch)
+    seen: list[ConversationConfig] = []
+
+    def recording_build_mode_theme(
+        config: ConversationConfig, **_kw: object
+    ) -> Theme:
+        seen.append(config)
+        return _NEUTRAL_THEME.model_copy(update={"domain": "debate: x"})
+
+    monkeypatch.setattr(
+        "hable_ya.pipeline.prompts.builder.build_mode_theme",
+        recording_build_mode_theme,
+    )
+    sp = await build_session_prompt(
+        {},
+        pool=_FakePool(),
+        recent_domains=[],
+        conversation_config=ConversationConfig(mode="debate", topic="x"),
+    )
+    assert [c.mode for c in seen] == ["debate"]
+    assert sp.mode == "debate"
+    assert sp.theme.domain == "debate: x"
+
+
+async def test_calibrated_open_without_topic_skips_mode_factory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _calibrated(monkeypatch)
+    called = False
+
+    def _fail_mode_theme(*_a: object, **_k: object) -> Theme:
+        nonlocal called
+        called = True
+        return _NEUTRAL_THEME
+
+    monkeypatch.setattr(
+        "hable_ya.pipeline.prompts.builder.build_mode_theme", _fail_mode_theme
+    )
+    monkeypatch.setattr(
+        "hable_ya.pipeline.prompts.builder.get_session_theme",
+        lambda **_kw: _NEUTRAL_THEME.model_copy(update={"domain": "random-pick"}),
+    )
+    sp = await build_session_prompt(
+        {},
+        pool=_FakePool(),
+        recent_domains=[],
+        conversation_config=ConversationConfig(mode="open", topic=None),
+    )
+    assert called is False  # open+no-topic keeps today's random pick
+    assert sp.mode == "open"
+    assert sp.theme.domain == "random-pick"
+
+
+async def test_uncalibrated_ignores_mode_and_stays_cold_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    snapshot = LearnerProfileSnapshot(band="A2", sessions_completed=0)
+    mock_repo = AsyncMock()
+    mock_repo.get.return_value = snapshot
+    monkeypatch.setattr(
+        "hable_ya.pipeline.prompts.builder.LearnerProfileRepo",
+        lambda _pool: mock_repo,
+    )
+
+    async def _is_calibrated_false(_pool: object) -> bool:
+        return False
+
+    monkeypatch.setattr(
+        "hable_ya.pipeline.prompts.builder.is_calibrated_async",
+        _is_calibrated_false,
+    )
+
+    def _fail_mode_theme(*_a: object, **_k: object) -> Theme:
+        raise AssertionError("mode factory must not run before calibration")
+
+    monkeypatch.setattr(
+        "hable_ya.pipeline.prompts.builder.build_mode_theme", _fail_mode_theme
+    )
+    sp = await build_session_prompt(
+        {},
+        pool=_FakePool(),
+        conversation_config=ConversationConfig(mode="debate", topic="x"),
+    )
+    assert sp.mode == "open"  # config dropped before calibration
+    assert COLD_START_INSTRUCTIONS in sp.text
+    assert sp.theme is _NEUTRAL_THEME

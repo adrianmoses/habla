@@ -203,8 +203,8 @@ async def test_sessions_history_and_pagination(
     async with clean_learner_state.acquire() as conn:
         await conn.execute(
             "INSERT INTO sessions (session_id, started_at, theme_domain, "
-            "band_at_start) VALUES ('s_old', $1, 'viaje', 'A2'), "
-            "('s_new', $2, 'comida', 'A2')",
+            "band_at_start, mode) VALUES ('s_old', $1, 'viaje', 'A2', 'open'), "
+            "('s_new', $2, 'debate: la comida', 'A2', 'debate')",
             old,
             new,
         )
@@ -224,6 +224,8 @@ async def test_sessions_history_and_pagination(
     assert [s["session_id"] for s in sessions] == ["s_new", "s_old"]  # newest first
     assert sessions[0]["turn_count"] == 2
     assert sessions[1]["turn_count"] == 0  # session with no turns still appears
+    assert sessions[0]["mode"] == "debate"  # spec 023: mode surfaces for #020
+    assert sessions[1]["mode"] == "open"
 
     # Pagination: limit=1 → newest only; offset=1 → the older one.
     r1 = await _get(app, "/api/learner/sessions?limit=1")
