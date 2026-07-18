@@ -32,6 +32,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+analiza = [
+    # Offline monólogo analysis CLI (docs/specs/analiza/spec.md).
+    # faster-whisper bundles silero VAD + ctranslate2 (CUDA-accelerated).
+    # ffmpeg is a system dependency. spacy + anthropic come from main deps.
+    "faster-whisper>=1.1.0",
+    "typer>=0.15.0",
+]
 eval = [
     "rich>=13.0.0",                # pretty eval output
     "pandas>=2.0.0",               # results aggregation
@@ -45,6 +52,9 @@ dev = [
     "rich>=13.0.0",
     "jsonschema>=4.0.0",           # tool-schema validation in tests
 ]
+
+[project.scripts]
+analiza = "analiza.cli:app"
 
 [build-system]
 requires = ["hatchling"]
@@ -110,4 +120,4 @@ asyncio_default_test_loop_scope = "session"
 testpaths = ["tests"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["hable_ya", "api"]
+packages = ["hable_ya", "api", "analiza"]
