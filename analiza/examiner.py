@@ -5,9 +5,12 @@ recorded in every output because prompt changes break score comparability.
 """
 
 import importlib.resources
+import json
+import os
+import re
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from analiza.config import Config
 
@@ -70,9 +73,34 @@ def build_prompt(
 ) -> str:
     """Fill the examiner_v1.md template with this session's inputs.
 
-    TODO(implement): simple .format()/replace on the template placeholders.
+    Sequential .replace(), not str.format() — the template body contains
+    literal braces in the output-schema description.
     """
-    raise NotImplementedError
+    hints = (
+        "; ".join(f"{s:.1f}s–{e:.1f}s" for s, e in low_conf_hints)
+        if low_conf_hints
+        else "(ninguno)"
+    )
+    connectors = (
+        ", ".join(subjunctive_connectors) if subjunctive_connectors else "(ninguno)"
+    )
+    prompt = load_prompt_template()
+    for placeholder, value in [
+        ("{ejercicio}", ejercicio),
+        ("{tema}", tema or "(sin tema)"),
+        ("{metrics_json}", json.dumps(metrics, ensure_ascii=False)),
+        ("{low_conf_hints}", hints),
+        ("{subjunctive_connectors}", connectors),
+        ("{transcript}", transcript),
+    ]:
+        prompt = prompt.replace(placeholder, value)
+    return prompt
+
+
+def _extract_json(text: str) -> str:
+    """Tolerate a fenced code block around the JSON, nothing more."""
+    fenced = re.search(r"```(?:json)?\s*(.*?)```", text, re.DOTALL)
+    return fenced.group(1).strip() if fenced else text.strip()
 
 
 def run_examiner(prompt: str, config: Config) -> ExaminerResult:
@@ -80,8 +108,35 @@ def run_examiner(prompt: str, config: Config) -> ExaminerResult:
 
     On a schema violation: one retry with the validation error appended to the
     prompt; on second failure raise ExaminerError.
-
-    TODO(implement): anthropic SDK call using config.llm_model, key from
-    config.llm_key_env.
     """
-    raise NotImplementedError
+    import anthropic
+
+    api_key = os.environ.get(config.llm_key_env)
+    if not api_key:
+        raise ExaminerError(f"{config.llm_key_env} is not set")
+    client = anthropic.Anthropic(api_key=api_key)
+
+    attempt_prompt = prompt
+    last_error = ""
+    for _ in range(2):
+        try:
+            response = client.messages.create(
+                model=config.llm_model,
+                max_tokens=4096,
+                messages=[{"role": "user", "content": attempt_prompt}],
+            )
+        except anthropic.AnthropicError as e:
+            raise ExaminerError(f"LLM call failed: {e}") from e
+        text = "".join(
+            block.text for block in response.content if block.type == "text"
+        )
+        try:
+            return ExaminerResult.model_validate_json(_extract_json(text))
+        except (ValidationError, ValueError) as e:
+            last_error = str(e)
+            attempt_prompt = (
+                f"{prompt}\n\nTu respuesta anterior no cumplió el esquema. "
+                f"Error de validación:\n{last_error}\n"
+                "Responde de nuevo únicamente con el JSON corregido."
+            )
+    raise ExaminerError(f"schema validation failed after retry: {last_error}")

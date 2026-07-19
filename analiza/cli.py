@@ -5,6 +5,8 @@ Exit codes: 0 ok · 1 transcription failed · 2 audio unreadable ·
 """
 
 import datetime as dt
+import json
+import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -12,14 +14,66 @@ from typing import Annotated
 
 import typer
 
-from analiza import audio, examiner, note, transcribe, vad
+from analiza import audio, connectors, examiner, metrics, note, transcribe, vad
 from analiza import config as config_mod
+from analiza.conectores_b2 import CONECTORES
 from analiza.examiner import PROMPT_VERSION
 
 EXIT_TRANSCRIPTION_FAILED = 1
 EXIT_AUDIO_UNREADABLE = 2
 EXIT_VAULT_WRITE_FAILED = 3
 EXIT_LLM_FAILED = 4
+
+def _lemmatize(text: str) -> list[str]:
+    """spaCy es_core_news_sm lemmas of alphabetic tokens; degrades to empty
+    (with a warning) when the model isn't installed — TTR/MTLD read 0 then."""
+    import spacy
+
+    try:
+        nlp = spacy.load("es_core_news_sm")
+    except OSError:
+        typer.echo(
+            "warning: spaCy model es_core_news_sm not installed "
+            "(python -m spacy download es_core_news_sm); ttr/mtld will be 0",
+            err=True,
+        )
+        return []
+    return [t.lemma_.lower() for t in nlp(text) if t.is_alpha]
+
+
+def _stats_row(
+    fecha: dt.date,
+    ejercicio: str,
+    tema: str | None,
+    metrics_dict: dict[str, float | int],
+    examiner_result: "examiner.ExaminerResult | None",
+) -> dict[str, object]:
+    """One append-only CSV row (note.STATS_COLUMNS order). LLM columns are
+    empty strings when the examiner pass was skipped or failed."""
+    return {
+        "date": fecha.isoformat(),
+        "ejercicio": ejercicio,
+        "tema": tema or "",
+        "duration_s": metrics_dict["duration_s"],
+        "wpm_gross": metrics_dict["wpm_gross"],
+        "wpm_articulation": metrics_dict["wpm_articulation"],
+        "pauses_n": metrics_dict["pauses_n"],
+        "pause_max_s": metrics_dict["pause_max_s"],
+        "fillers_per_min": metrics_dict["fillers_per_min"],
+        "connectors_unique": metrics_dict["connectors_unique_n"],
+        "formal_ratio": metrics_dict["connectors_formal_ratio"],
+        "mtld": metrics_dict["mtld"],
+        "errors_n": (
+            len(examiner_result.errores) if examiner_result is not None else ""
+        ),
+        "score_total": (
+            sum(p.puntuacion for p in examiner_result.puntuaciones)
+            if examiner_result is not None
+            else ""
+        ),
+        "prompt_version": PROMPT_VERSION,
+    }
+
 
 app = typer.Typer(
     add_completion=False,
@@ -109,10 +163,17 @@ def main(
         typer.echo(f"error: audio unreadable: {e}", err=True)
         raise typer.Exit(EXIT_AUDIO_UNREADABLE) from e
 
-    # D. Metrics — TODO(implement): lemmatize with spaCy, match connectors,
-    # call metrics.compute_metrics(). Placeholder until those land:
-    metrics_dict: dict[str, float | int] = {"duration_s": prepared.duration_s}
-    _ = (segments, transcription)  # consumed by the TODO above
+    # D. Metrics
+    lemmas = _lemmatize(transcription.text)
+    matches = connectors.match_connectors(transcription.text, CONECTORES)
+    metrics_dict = metrics.compute_metrics(
+        duration_s=prepared.duration_s,
+        segments=segments,
+        words=transcription.words,
+        lemmas=lemmas,
+        connector_matches=matches,
+        thresholds=cfg.thresholds,
+    )
 
     # E. LLM examiner
     examiner_result: examiner.ExaminerResult | None = None
@@ -124,8 +185,12 @@ def main(
                 metrics=metrics_dict,
                 tema=tema,
                 ejercicio=ejercicio,
-                low_conf_hints=[],  # TODO(implement): metrics.low_conf_spans
-                subjunctive_connectors=[],  # TODO(implement): from matches
+                low_conf_hints=metrics.low_conf_spans(
+                    transcription.words, cfg.thresholds.low_conf_prob
+                ),
+                subjunctive_connectors=sorted(
+                    {m.conector.forma for m in matches if m.conector.subjuntivo}
+                ),
             )
             examiner_result = examiner.run_examiner(prompt, cfg)
         except examiner.ExaminerError as e:
@@ -153,10 +218,23 @@ def main(
     try:
         path = note.note_path(vault_root, fecha, ejercicio)
         note.write_note(path, note_md)
-        # TODO(implement): note.append_stats_row(...) and raw artifacts
-        # (whisper JSON, metrics JSON, LLM response JSON) into note.raw_dir().
+        note.append_stats_row(
+            vault_root,
+            _stats_row(fecha, ejercicio, tema, metrics_dict, examiner_result),
+        )
+        raw = note.raw_dir(vault_root, fecha, ejercicio)
+        transcribe.persist_raw(transcription, raw / "whisper.json")
+        (raw / "metrics.json").write_text(
+            json.dumps(metrics_dict, ensure_ascii=False, indent=2)
+        )
+        if examiner_result is not None:
+            (raw / "examiner.json").write_text(
+                examiner_result.model_dump_json(indent=2)
+            )
+        if cfg.copy_source_audio:
+            shutil.copy2(audio_path, raw / audio_path.name)
         typer.echo(f"wrote {path}")
-    except note.VaultWriteError as e:
+    except (note.VaultWriteError, OSError) as e:
         typer.echo(f"error: vault write failed: {e}", err=True)
         raise typer.Exit(EXIT_VAULT_WRITE_FAILED) from e
 
