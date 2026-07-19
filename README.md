@@ -180,6 +180,78 @@ SELECT * FROM cypher('learner_knowledge', $$
 $$) AS (label agtype, n agtype);
 ```
 
+## analiza — offline monólogo analysis
+
+`analiza` is a standalone CLI (spec: [`docs/specs/analiza/spec.md`](docs/specs/analiza/spec.md))
+that turns a recorded Spanish monólogo into deterministic fluency metrics, DELE
+B2 examiner feedback, and an Obsidian session note plus a row in a long-term
+stats CSV. Design principle: **deterministic layer for trends, LLM layer for
+judgment** — metrics are reproducible across months regardless of prompt or
+model changes; anything requiring interpretation lives in the LLM layer.
+
+```bash
+uv sync --extra analiza
+uv run python -m spacy download es_core_news_sm   # lemmas for TTR/MTLD
+# ffmpeg must be on PATH; ANTHROPIC_API_KEY for the examiner pass
+
+uv run analiza grabacion.m4a --tema "mi fin de semana"
+uv run analiza grabacion.m4a --no-llm --dry-run   # metrics only, print to stdout
+```
+
+Transcription runs on the GPU when the CUDA runtime libs are present and falls
+back to CPU otherwise. A ~65 s sample recording lives at
+`tests/fixtures/analiza/monologo-prueba-65s.m4a`.
+
+### The metrics
+
+Pauses come from Silero VAD, not from the transcript — VAD is immune to
+transcription errors, so it is the authoritative source for pause metrics.
+Word-level data (fillers, repeats, confidence) comes from faster-whisper with
+`condition_on_previous_text=False` to reduce error-correction smoothing.
+
+**Rate & pausing** — the hesitation profile:
+
+- `wpm_gross` — words ÷ total duration × 60. The headline speaking rate.
+- `wpm_articulation` — words ÷ speech time (VAD) × 60. How fast you speak
+  *while actually speaking*. A large gap between articulation and gross rate
+  means the time is going into silences, not slow speech.
+- `pauses_n`, `pauses_total_s`, `pause_max_s` — VAD silences ≥ 0.7 s
+  (configurable), including leading/trailing silence.
+- `pauses_midclause_n` — pauses whose preceding transcribed word doesn't end a
+  sentence (no `.?!`). A proxy for word-retrieval struggle: pausing at a
+  sentence boundary is natural, pausing mid-clause usually isn't.
+
+**Lexical range** — the *alcance* trend:
+
+- `connectors_unique_n` — distinct B2 discourse connectors matched from the
+  inventory in `analiza/conectores_b2.py` (longest-first, word-bounded;
+  discontinuous pairs like "no solo … sino también" count once).
+- `connectors_formal_ratio` — formal ÷ total connectors matched. The main
+  register-range trend metric.
+- `ttr` — type–token ratio over spaCy lemmas. Simple but length-sensitive.
+- `mtld` — Measure of Textual Lexical Diversity over lemmas. Preferred over
+  TTR because it is robust to recording length; higher = more varied
+  vocabulary.
+
+**Disfluency & data quality:**
+
+- `fillers_n`, `fillers_per_min` — muletillas ("eh", "pues", "o sea", …).
+  **A floor, not truth**: Whisper suppresses fillers, so only the trend
+  direction is meaningful, never the absolute value.
+- `repeats_n` — immediately repeated words or two-word phrases ("para para",
+  "a la a la"). A self-repair proxy.
+- `low_conf_spans_n` — runs of ≥2 consecutive words transcribed with
+  probability < 0.5. Passed to the examiner as "audio unclear here" hints;
+  also flags mumbling.
+- `vad_transcript_gap_s` — speech time (per VAD) with no transcribed words.
+  Usually suppressed fillers or mumbling; a data-quality signal, not a skill
+  metric.
+
+Known limitations (spec §5): Whisper silently corrects some learner errors, so
+the examiner's error table is a lower bound; pronunciation is out of scope for
+v0.x; examiner scores from different `prompt_version`s are not comparable —
+the stats CSV records the version so trend analysis can filter on it.
+
 ## History
 
 This fork replaced hable-ya's on-device model stack with cloud APIs. The
