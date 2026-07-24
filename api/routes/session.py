@@ -40,6 +40,7 @@ from hable_ya.pipeline.conversation import (
     parse_conversation_config,
 )
 from hable_ya.pipeline.log_turn_handler import make_log_turn_handler
+from hable_ya.pipeline.processors.response_latency import ResponseLatencyObserver
 from hable_ya.pipeline.prompts.builder import build_session_prompt
 from hable_ya.pipeline.runner import build_pipeline_task, default_learner
 from hable_ya.pipeline.serializer import RawPCMSerializer
@@ -201,8 +202,15 @@ async def session_ws(websocket: WebSocket) -> None:
         messages=[{"role": "system", "content": session_prompt.text}],
         tools=HABLE_YA_TOOLS_SCHEMA,
     )
+    # Learner response latency (spec #024): the observer measures at speech
+    # onset; the handler consumes the value onto that turn's observation.
+    # Built here so both sides share the per-session instance.
+    response_latency = ResponseLatencyObserver()
     services.llm.register_function(
-        LOG_TURN_NAME, make_log_turn_handler(sink, session_id, ingest=ingest)
+        LOG_TURN_NAME,
+        make_log_turn_handler(
+            sink, session_id, ingest=ingest, latency=response_latency
+        ),
     )
 
     transport = FastAPIWebsocketTransport(
@@ -218,7 +226,14 @@ async def session_ws(websocket: WebSocket) -> None:
         ),
     )
 
-    task = build_pipeline_task(services, transport, context, settings, sink=sink)
+    task = build_pipeline_task(
+        services,
+        transport,
+        context,
+        settings,
+        sink=sink,
+        extra_observers=[response_latency],
+    )
     this = ActiveSession(session_id=session_id, task=task, websocket=websocket)
 
     # Preemptive single-session cap: install as active (lock held only for the

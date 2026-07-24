@@ -23,11 +23,13 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Awaitable, Callable
+from typing import Any
 
 from pipecat.frames.frames import FunctionCallResultProperties
 from pipecat.services.llm_service import FunctionCallParams
 
 from hable_ya.learner.ingest import TurnIngestService
+from hable_ya.pipeline.processors.response_latency import ResponseLatencyObserver
 from hable_ya.pipeline.prompts.render import normalize_runtime_log_turn_args
 from hable_ya.runtime.observations import TurnObservation, TurnObservationSink
 
@@ -41,8 +43,15 @@ def make_log_turn_handler(
     session_id: str,
     *,
     ingest: TurnIngestService | None = None,
+    latency: ResponseLatencyObserver | None = None,
 ) -> LogTurnHandler:
-    """Build the per-session ``log_turn`` function handler."""
+    """Build the per-session ``log_turn`` function handler.
+
+    ``latency`` is the session's :class:`ResponseLatencyObserver` (spec #024).
+    Its pending measurement — taken at this turn's speech onset, which strictly
+    precedes the STT → LLM → ``log_turn`` dispatch — is consumed into the
+    observation's ``extra`` so it persists with the turn.
+    """
 
     async def handle_log_turn(params: FunctionCallParams) -> None:
         try:
@@ -75,6 +84,12 @@ def make_log_turn_handler(
                     raw_args.get("cefr_band"),
                 )
 
+            extra: dict[str, Any] = {}
+            if latency is not None:
+                response_latency_ms = latency.pop()
+                if response_latency_ms is not None:
+                    extra["response_latency_ms"] = response_latency_ms
+
             obs = TurnObservation.now(
                 session_id=session_id,
                 learner_utterance=normalized["learner_utterance"],
@@ -82,6 +97,7 @@ def make_log_turn_handler(
                 fluency_signal=normalized["fluency_signal"],
                 L1_used=normalized["L1_used"],
                 cefr_band=cefr_band,
+                extra=extra,
             )
             await sink.append(obs)
             if ingest is not None:

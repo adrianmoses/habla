@@ -92,25 +92,32 @@ def build_pipeline(
     )
 
 
-def build_observers(settings: Settings) -> list[BaseObserver] | None:
-    """Latency observers for the task, or None when `latency_debug` is off.
+def build_observers(
+    settings: Settings,
+    extra_observers: list[BaseObserver] | None = None,
+) -> list[BaseObserver] | None:
+    """Observers for the task, or None when there are none to attach.
 
-    When on: `UserBotLatencyObserver` for the end-to-end number, plus
-    `PerStageLatencyObserver` for the STT/LLM/TTS TTFB split (#013), both
-    logging under `hable_ya.latency`.
+    `extra_observers` (e.g. the per-session `ResponseLatencyObserver`, #024)
+    are always included. The `latency_debug` gate applies only to the #013
+    diagnostics: `UserBotLatencyObserver` for the end-to-end number plus
+    `PerStageLatencyObserver` for the STT/LLM/TTS TTFB split, both logging
+    under `hable_ya.latency`.
     """
-    if not settings.latency_debug:
-        return None
+    observers: list[BaseObserver] = list(extra_observers or [])
 
-    observer = UserBotLatencyObserver()  # type: ignore[no-untyped-call]
+    if settings.latency_debug:
+        observer = UserBotLatencyObserver()  # type: ignore[no-untyped-call]
 
-    @observer.event_handler("on_latency_measured")  # type: ignore[untyped-decorator]
-    async def _log_latency(_obs: UserBotLatencyObserver, latency_s: float) -> None:
-        latency_logger.info("end_to_end_ms=%d", int(latency_s * 1000))
+        @observer.event_handler("on_latency_measured")  # type: ignore[untyped-decorator]
+        async def _log_latency(_obs: UserBotLatencyObserver, latency_s: float) -> None:
+            latency_logger.info("end_to_end_ms=%d", int(latency_s * 1000))
 
-    # Per-stage split alongside end-to-end, from the MetricsFrames that
-    # `enable_metrics=True` already emits.
-    return [observer, PerStageLatencyObserver()]
+        # Per-stage split alongside end-to-end, from the MetricsFrames that
+        # `enable_metrics=True` already emits.
+        observers += [observer, PerStageLatencyObserver()]
+
+    return observers or None
 
 
 def build_pipeline_task(
@@ -120,6 +127,7 @@ def build_pipeline_task(
     settings: Settings,
     *,
     sink: TurnObservationSink,
+    extra_observers: list[BaseObserver] | None = None,
 ) -> PipelineTask:
     pipeline = build_pipeline(
         services,
@@ -137,7 +145,7 @@ def build_pipeline_task(
             audio_in_sample_rate=settings.audio_sample_rate,
             audio_out_sample_rate=settings.audio_sample_rate,
         ),
-        observers=build_observers(settings),
+        observers=build_observers(settings, extra_observers),
         # Reap half-open/abandoned sessions without needing a new connection to
         # evict them (spec #016).
         idle_timeout_secs=settings.session_idle_timeout_secs,

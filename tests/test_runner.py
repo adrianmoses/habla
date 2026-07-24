@@ -21,6 +21,7 @@ from pipecat.processors.frame_processor import FrameProcessor
 from hable_ya.config import Settings
 from hable_ya.pipeline.processors.latency_metrics import PerStageLatencyObserver
 from hable_ya.pipeline.processors.log_turn_observer import LogTurnEmissionObserver
+from hable_ya.pipeline.processors.response_latency import ResponseLatencyObserver
 from hable_ya.pipeline.processors.turn_observer import HableYaTurnObserver
 from hable_ya.pipeline.runner import build_observers, build_pipeline
 from hable_ya.pipeline.services import Services
@@ -155,5 +156,21 @@ def test_build_observers_includes_per_stage_when_debug() -> None:
     """latency_debug attaches both the end-to-end and per-stage observers (#013)."""
     observers = build_observers(Settings(latency_debug=True))
     assert observers is not None
+    assert any(isinstance(o, PerStageLatencyObserver) for o in observers)
+    assert any(isinstance(o, UserBotLatencyObserver) for o in observers)
+
+
+def test_build_observers_extras_always_included() -> None:
+    """Extra observers (#024) attach regardless of the latency_debug gate."""
+    extra = ResponseLatencyObserver()
+    observers = build_observers(Settings(), [extra])
+    assert observers == [extra]
+
+
+def test_build_observers_extras_alongside_debug() -> None:
+    extra = ResponseLatencyObserver()
+    observers = build_observers(Settings(latency_debug=True), [extra])
+    assert observers is not None
+    assert extra in observers
     assert any(isinstance(o, PerStageLatencyObserver) for o in observers)
     assert any(isinstance(o, UserBotLatencyObserver) for o in observers)

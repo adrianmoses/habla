@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -116,6 +117,32 @@ async def test_second_turn_increments_without_duplication(
         "MATCH (v:VocabItem {lemma: 'comer'}) RETURN v.production_count",
     )
     assert vocab_count == 2
+
+
+async def test_ingest_persists_extra_to_raw_extra(
+    ingest_ready: asyncpg.Pool,
+) -> None:
+    """Spec #024: TurnObservation.extra (e.g. response_latency_ms) round-trips
+    through the previously never-written turns.raw_extra JSONB column."""
+    ingest = TurnIngestService(ingest_ready)
+    obs = _obs()
+    obs.extra = {"response_latency_ms": 850}
+    await ingest.ingest(obs)
+
+    async with ingest_ready.acquire() as conn:
+        raw = await conn.fetchval("SELECT raw_extra FROM turns")
+    assert json.loads(raw) == {"response_latency_ms": 850}
+
+
+async def test_ingest_empty_extra_writes_empty_object(
+    ingest_ready: asyncpg.Pool,
+) -> None:
+    ingest = TurnIngestService(ingest_ready)
+    await ingest.ingest(_obs())
+
+    async with ingest_ready.acquire() as conn:
+        raw = await conn.fetchval("SELECT raw_extra FROM turns")
+    assert json.loads(raw) == {}
 
 
 async def test_start_session_creates_session_row_and_scenario_edge(
