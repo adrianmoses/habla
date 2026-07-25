@@ -107,3 +107,10 @@ jobs:
 
       - name: Build (typecheck + vite build)
         run: npm run build
+
+      # Pure-logic unit tests (spec #020): streak / duration / label
+      # derivation and the API client's auth handling. No jsdom, no component
+      # rendering — the browser-dependent code stays covered by the build gate
+      # and the manual checklist.
+      - name: Test
+        run: npm test
