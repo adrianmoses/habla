@@ -11,8 +11,9 @@ import AgentCard from '../components/AgentCard';
 import AppShell from '../components/AppShell';
 import { Eyebrow, page, Panel, PageTitle } from '../components/ui';
 import { useHealth } from '../lib/health';
+import { useSessionToken } from '../lib/learner';
 import { navigate } from '../lib/router';
-import { clearSessionToken, getSessionToken, setSessionToken } from '../lib/token';
+import { clearSessionToken, setSessionToken } from '../lib/token';
 
 const HEALTH_COPY: Record<string, { dot: string; text: string }> = {
   ready: { dot: '#6b8f5a', text: 'Todo listo — María puede escucharte.' },
@@ -24,7 +25,7 @@ const HEALTH_COPY: Record<string, { dot: string; text: string }> = {
 export default function Ajustes() {
   const health = useHealth();
   const [draft, setDraft] = useState('');
-  const [hasToken, setHasToken] = useState(() => getSessionToken() !== undefined);
+  const hasToken = useSessionToken() !== undefined;
   const [saved, setSaved] = useState(false);
 
   const status = HEALTH_COPY[health] ?? HEALTH_COPY.unknown;
@@ -34,14 +35,12 @@ export default function Ajustes() {
     if (!t) return;
     setSessionToken(t);
     setDraft('');
-    setHasToken(true);
     setSaved(true);
     setTimeout(() => setSaved(false), 1600);
   };
 
   const clear = () => {
     clearSessionToken();
-    setHasToken(false);
     navigate('home');
   };
 

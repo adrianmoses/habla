@@ -14,7 +14,7 @@ import {
   PageTitle,
 } from '../components/ui';
 import { formatDay, formatDuration, formatMode } from '../lib/format';
-import { useAuthBounce, usePagedSessions } from '../lib/learner';
+import { usePagedSessions } from '../lib/learner';
 import type { SessionRow } from '../lib/types';
 
 function Row({ session }: { session: SessionRow }) {
@@ -84,7 +84,6 @@ function Row({ session }: { session: SessionRow }) {
 
 export default function Historial() {
   const { sessions, error, loading, hasMore, loadMore } = usePagedSessions();
-  useAuthBounce(error);
 
   const empty = !loading && !error && sessions.length === 0;
 

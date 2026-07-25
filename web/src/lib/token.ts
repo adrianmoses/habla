@@ -7,6 +7,20 @@
 
 const KEY = 'habla.sessionToken';
 
+// sessionStorage fires no event for same-tab writes, so readers would never
+// learn that a token was pasted or rejected. This is that missing signal: the
+// data hooks subscribe, so saving a token starts the fetches it enables and a
+// 401 stops them (spec #020).
+const TOKEN_EVENT = 'habla:token';
+
+// Guarded like the storage access below: this module is imported by pure
+// logic that runs outside a DOM (unit tests today, anything non-browser
+// later), and a missing `window` must not turn a token write into a crash.
+function announce(): void {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new Event(TOKEN_EVENT));
+}
+
 export function getSessionToken(): string | undefined {
   try {
     return sessionStorage.getItem(KEY) ?? undefined;
@@ -22,6 +36,7 @@ export function setSessionToken(token: string): void {
   } catch {
     // Non-fatal: if storage is unavailable the operator re-pastes next load.
   }
+  announce();
 }
 
 export function clearSessionToken(): void {
@@ -30,4 +45,11 @@ export function clearSessionToken(): void {
   } catch {
     // ignore
   }
+  announce();
+}
+
+export function subscribeToken(onChange: () => void): () => void {
+  if (typeof window === 'undefined') return () => undefined;
+  window.addEventListener(TOKEN_EVENT, onChange);
+  return () => window.removeEventListener(TOKEN_EVENT, onChange);
 }

@@ -14,9 +14,14 @@ import {
   formatRelative,
   MODE_OPTIONS,
 } from '../lib/format';
-import { isAuthError, useLearnerProfile, useSessions } from '../lib/learner';
+import {
+  isAuthError,
+  useLearnerProfile,
+  useSessions,
+  useSessionToken,
+} from '../lib/learner';
 import { navigate } from '../lib/router';
-import { getSessionToken, setSessionToken } from '../lib/token';
+import { setSessionToken } from '../lib/token';
 import type { ConversationMode } from '../lib/types';
 import type { SessionRequest } from '../voice/types';
 
@@ -53,22 +58,17 @@ export default function Home({ onStart, error }: Props) {
   const [topic, setTopic] = useState('');
 
   // Session-auth token (spec #018, OQ1 Option B): pasted once by the operator,
-  // kept in sessionStorage — never baked into the bundle. A rejected token is
-  // cleared by `apiGet`, so an auth failure here drops us back to the prompt.
+  // kept in sessionStorage — never baked into the bundle. Read reactively, so
+  // saving one immediately starts the learner fetches and a 401 (which clears
+  // it in `apiGet`) drops straight back to this prompt.
   const [tokenDraft, setTokenDraft] = useState('');
-  const [tokenSaved, setTokenSaved] = useState(
-    () => getSessionToken() !== undefined,
-  );
-  const authRejected =
-    isAuthError(profile.error) || isAuthError(sessions.error);
-  const hasToken = tokenSaved && !authRejected;
+  const hasToken = useSessionToken() !== undefined;
 
   const saveToken = () => {
     const t = tokenDraft.trim();
     if (!t) return;
     setSessionToken(t);
     setTokenDraft('');
-    setTokenSaved(true);
   };
 
   const ready = health === 'ready';

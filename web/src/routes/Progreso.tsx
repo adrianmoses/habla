@@ -22,7 +22,7 @@ import {
   toPercent,
   vocabByProduction,
 } from '../lib/format';
-import { useAuthBounce, useBandHistory, useLearnerProfile } from '../lib/learner';
+import { useBandHistory, useLearnerProfile } from '../lib/learner';
 import type { BandChange } from '../lib/types';
 
 function bandChangeLine(change: BandChange): string {
@@ -41,7 +41,6 @@ function bandChangeLine(change: BandChange): string {
 export default function Progreso() {
   const profile = useLearnerProfile();
   const bands = useBandHistory();
-  useAuthBounce(profile.error, bands.error);
 
   const p = profile.data;
 
@@ -83,24 +82,34 @@ export default function Progreso() {
           >
             <Panel>
               <Eyebrow>Tu español</Eyebrow>
-              <div style={{ display: 'grid', gap: 22 }}>
-                <Meter
-                  value={100 - toPercent(p.l1_reliance)}
-                  hint={
-                    p.l1_reliance <= 0.15
-                      ? 'Casi todo lo dices en español.'
-                      : 'Cada vez recurres menos al inglés.'
-                  }
-                />
-                <Meter
-                  value={toPercent(p.speech_fluency)}
-                  hint={
-                    p.speech_fluency >= 0.7
-                      ? 'Hablas con soltura, en frases completas.'
-                      : 'Tu fluidez va creciendo sesión a sesión.'
-                  }
-                />
-              </div>
+              {/* Both signals are computed over a trailing 20-turn window, so
+                  with no turns the API returns a neutral 0.5 for each. Drawing
+                  those as half-full meters would invent progress the learner
+                  has not made — say nothing instead. */}
+              {p.sessions_completed === 0 ? (
+                <Empty>
+                  Cuando hablemos un poco, aquí verás cómo va tu español.
+                </Empty>
+              ) : (
+                <div style={{ display: 'grid', gap: 22 }}>
+                  <Meter
+                    value={100 - toPercent(p.l1_reliance)}
+                    hint={
+                      p.l1_reliance <= 0.15
+                        ? 'Casi todo lo dices en español.'
+                        : 'Cada vez recurres menos al inglés.'
+                    }
+                  />
+                  <Meter
+                    value={toPercent(p.speech_fluency)}
+                    hint={
+                      p.speech_fluency >= 0.7
+                        ? 'Hablas con soltura, en frases completas.'
+                        : 'Tu fluidez va creciendo sesión a sesión.'
+                    }
+                  />
+                </div>
+              )}
             </Panel>
 
             <Panel>

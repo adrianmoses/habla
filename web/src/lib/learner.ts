@@ -5,9 +5,10 @@
 // reading two endpoints degrades one region when one fails rather than blanking
 // the page (spec Key Decision: per-surface failure, not per-page).
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import { apiGet, UnauthorizedError } from './api';
 import { navigate } from './router';
+import { getSessionToken, subscribeToken } from './token';
 import type {
   BandHistoryPage,
   LearnerProfile,
@@ -22,7 +23,20 @@ export type Async<T> = {
   loading: boolean;
 };
 
+/**
+ * The stored session token, re-rendering when it is saved or cleared.
+ *
+ * Without this the hooks below would fetch once on mount with whatever token
+ * existed then — so pasting one on Home would populate nothing until a reload,
+ * and the guaranteed 401 from a tokenless first load would race in and clear
+ * the token the operator had just typed.
+ */
+export function useSessionToken(): string | undefined {
+  return useSyncExternalStore(subscribeToken, getSessionToken, () => undefined);
+}
+
 function useApi<T>(path: string): Async<T> {
+  const token = useSessionToken();
   const [state, setState] = useState<Async<T>>({
     data: null,
     error: null,
@@ -32,6 +46,13 @@ function useApi<T>(path: string): Async<T> {
   useEffect(() => {
     let cancelled = false;
     const controller = new AbortController();
+
+    // No token: every request would be a guaranteed 401. Stay idle and let
+    // Home prompt for one rather than manufacturing an error to display.
+    if (token === undefined) {
+      setState({ data: null, error: null, loading: false });
+      return;
+    }
 
     setState({ data: null, error: null, loading: true });
     apiGet<T>(path, controller.signal)
@@ -49,7 +70,7 @@ function useApi<T>(path: string): Async<T> {
       cancelled = true;
       controller.abort();
     };
-  }, [path]);
+  }, [path, token]);
 
   return state;
 }
@@ -84,6 +105,7 @@ export type PagedSessions = {
  * side; the default page is well under that.
  */
 export function usePagedSessions(pageSize = 20): PagedSessions {
+  const token = useSessionToken();
   const [sessions, setSessions] = useState<SessionRow[]>([]);
   const [offset, setOffset] = useState(0);
   const [error, setError] = useState<Error | null>(null);
@@ -93,6 +115,12 @@ export function usePagedSessions(pageSize = 20): PagedSessions {
   useEffect(() => {
     let cancelled = false;
     const controller = new AbortController();
+
+    if (token === undefined) {
+      setLoading(false);
+      setHasMore(false);
+      return;
+    }
 
     setLoading(true);
     apiGet<SessionsPage>(
@@ -118,7 +146,7 @@ export function usePagedSessions(pageSize = 20): PagedSessions {
       cancelled = true;
       controller.abort();
     };
-  }, [offset, pageSize]);
+  }, [offset, pageSize, token]);
 
   const loadMore = useCallback(() => {
     setOffset((prev) => prev + pageSize);
@@ -133,14 +161,19 @@ export function isAuthError(error: Error | null): boolean {
 }
 
 /**
- * Send the user back to Home when a read was rejected.
+ * Keep the token-less user on Home, where the paste prompt lives.
  *
- * `apiGet` has already cleared the stored token by this point, so Home renders
- * its paste prompt — the same recovery `Session.tsx` runs on a 1008 close.
+ * Stated as a rule about the token rather than about errors, deliberately. A
+ * 401 clears the token inside `apiGet`, which re-runs every hook with no token
+ * — wiping the very error a per-screen "did this fail with 401?" check would
+ * have needed to observe, and stranding the user on an empty screen with no
+ * explanation. Watching the token instead covers that, a deep link with no
+ * token, and a manual clear from Ajustes, with one rule.
  */
-export function useAuthBounce(...errors: (Error | null)[]): void {
-  const rejected = errors.some(isAuthError);
+export function useAuthGuard(route: string): void {
+  const token = useSessionToken();
+  const stranded = token === undefined && route !== 'home';
   useEffect(() => {
-    if (rejected) navigate('home');
-  }, [rejected]);
+    if (stranded) navigate('home');
+  }, [stranded]);
 }

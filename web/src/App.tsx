@@ -5,10 +5,13 @@ import Progreso from './routes/Progreso';
 import Historial from './routes/Historial';
 import Ajustes from './routes/Ajustes';
 import { useRoute } from './lib/router';
+import { useAuthGuard } from './lib/learner';
 import type { SessionRequest } from './voice/types';
 
 export default function App() {
   const route = useRoute();
+  // One rule for every authed screen: no token means Home, where the prompt is.
+  useAuthGuard(route);
   // The live session is state, not a route (spec OQ2): it holds a microphone
   // permission and an open paid-API socket, so a reload must never restore it.
   const [session, setSession] = useState<SessionRequest | null>(null);
