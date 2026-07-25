@@ -15,6 +15,7 @@ re-raised — the session-end path stays best-effort.
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import UTC, datetime
 
@@ -154,8 +155,8 @@ class TurnIngestService:
                 """
                 INSERT INTO turns
                     (session_id, timestamp, learner_utterance,
-                     fluency_signal, L1_used, cefr_band)
-                VALUES ($1, $2, $3, $4, $5, $6)
+                     fluency_signal, L1_used, cefr_band, raw_extra)
+                VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
                 RETURNING id
                 """,
                 obs.session_id,
@@ -164,5 +165,8 @@ class TurnIngestService:
                 obs.fluency_signal,
                 obs.L1_used,
                 obs.cefr_band,
+                # Spec #024: extra (e.g. response_latency_ms) was previously
+                # dropped on the DB path; asyncpg takes JSONB as text.
+                json.dumps(obs.extra, ensure_ascii=False),
             )
         )
