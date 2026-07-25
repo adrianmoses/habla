@@ -3,8 +3,9 @@
 | Field | Value |
 |---|---|
 | id | 020 |
-| status | draft |
+| status | approved |
 | created | 2026-07-25 |
+| approved | 2026-07-25 |
 
 ---
 
@@ -204,56 +205,55 @@ actually uses the topic, via #023's mode/topic query params.
 
 ### Open Questions
 
+All five resolved at approval (2026-07-25) — the recommended default was
+accepted in each case.
+
 1. **Router: new dependency or ~40 lines in-repo?** `App.tsx:5-30` is a
    hand-rolled two-state machine with no URL involvement, and `web/package.json`
    has exactly two runtime deps (react, react-dom). Going to five screens with
    deep links needs *something*.
-   - **Option A (recommended): a minimal in-repo router** — a `useRoute()` hook
-     over `history.pushState` + `popstate`, a `navigate(path)` helper, and a
-     `switch` in `App.tsx`. No new dependency, no nested routes or params
-     needed, ~40 lines. Caddy's SPA fallback and the Vite dev server already
-     serve any path to `index.html`.
-   - **Option B:** add `react-router-dom` (~10 kB gz). More robust and familiar,
-     but a dependency and a build-size increase for five flat routes.
-   - **Recommendation: A**, consistent with the codebase's demonstrated
-     minimal-dependency posture. Revisit if route params ever appear.
+   **Resolved: a minimal in-repo router** — a `useRoute()` hook over
+   `history.pushState` + `popstate`, a `navigate(path)` helper, and a `switch`
+   in `App.tsx`. No new dependency, no nested routes or params needed, ~40
+   lines. Caddy's SPA fallback and the Vite dev server already serve any path to
+   `index.html`. `react-router-dom` (~10 kB gz) is rejected as disproportionate
+   for five flat routes and inconsistent with the codebase's demonstrated
+   minimal-dependency posture. Revisit if route params ever appear.
 
 2. **Is the live session URL-addressable?** If routes become real URLs, a reload
    on `/sesion` would re-mount `Session`, which immediately calls
    `getUserMedia` and opens a paid-API WebSocket.
-   - **Recommendation: no.** Keep the active session as in-app state on the
-     Home route (as today), not a URL. A session is a device-permission-bearing,
-     non-restorable resource; restoring it from a bookmark is wrong. While a
-     session is live, push one history entry so browser Back performs a clean
-     `disconnect()` + exit rather than abandoning an open socket.
+   **Resolved: no.** The active session stays in-app state on the Home route (as
+   today), not a URL. A session is a device-permission-bearing, non-restorable
+   resource; restoring it from a bookmark is wrong. While a session is live,
+   push one history entry so browser Back performs a clean `disconnect()` + exit
+   rather than abandoning an open socket.
 
 3. **Does the mode/topic picker land in #020 or split out?** #023's roadmap row
    assigns "the picker UI" to #020, and it is what makes the topic cards
    genuinely functional rather than merely accurate.
-   - **Recommendation: include it**, as the last workstream, so it can be cut
-     without disturbing the read-only screens if the spec runs long. If cut, the
-     topic cards must become non-interactive (no `cursor: pointer`) rather than
-     shipping as decorative-but-live.
+   **Resolved: included**, as the last workstream (WS6) so it stays severable.
+   Should it ever be cut, the topic cards must become non-interactive (no
+   `cursor: pointer`) rather than shipping as decorative-but-live — the whole
+   point of this spec is that a surface must not look actionable and do nothing.
 
 4. **Web test infrastructure: add Vitest, or stay build-gate-only?** `web/` has
    no test runner today; CI's `web` job runs `npm run build` only. The genuinely
    error-prone logic here is pure and small: consecutive-day streak computation
    (day boundaries, local timezone, duplicate same-day sessions), duration and
    relative-time formatting (null `ended_at`), and the API client's 401 path.
-   - **Option A (recommended): add `vitest` as a dev dependency and unit-test
-     the pure helpers only** — no jsdom, no React Testing Library, no component
-     rendering. One dev dep, a `test` script, one CI step.
-   - **Option B:** no runner; rely on `tsc` + manual verification.
-   - **Recommendation: A.** The streak calculation in particular is the kind of
-     thing that is silently wrong for months.
+   **Resolved: add `vitest` as a dev dependency and unit-test the pure helpers
+   only** — no jsdom, no React Testing Library, no component rendering. One dev
+   dep, a `test` script, one CI step. The streak calculation in particular is
+   the kind of thing that is silently wrong for months.
 
 5. **How are the recent-topic cards deduplicated?** `/api/learner/sessions`
    returns sessions, not distinct topics, and a learner may do "pedir un café"
    three times.
-   - **Recommendation:** render the most recent session per distinct
-     `theme_domain`, client-side, capped at six to preserve the current layout.
-     Pull `limit=20` and dedupe. If it proves awkward, revisit as a #019
-     amendment rather than working around it in the view.
+   **Resolved: most-recent-session-per-distinct-`theme_domain`, client-side,
+   capped at six** to preserve the current layout. Pull `limit=20` and dedupe.
+   If it proves awkward in practice, revisit as a #019 amendment rather than
+   working around it in the view.
 
 ---
 
@@ -267,9 +267,10 @@ prerequisite for everything; WS3–WS6 are independent of each other.
 **WS1 — Routing shell + API client.**
 - `web/src/lib/router.ts`: `useRoute()` (reads `location.pathname`, subscribes
   to `popstate`) and `navigate(path)` (`history.pushState` + a synthetic
-  update). Routes: `/` (Home), `/progreso`, `/historial`, `/ajustes`; anything
-  else falls back to Home. `App.tsx` switches on it, keeping the live session as
-  in-app state layered over `/` (Open Question 2).
+  update) — in-repo, no new dependency (OQ1). Routes: `/` (Home), `/progreso`,
+  `/historial`, `/ajustes`; anything else falls back to Home. `App.tsx` switches
+  on it, keeping the live session as in-app state layered over `/`, never a URL
+  (OQ2), with one pushed history entry so Back exits the session cleanly.
 - `web/src/lib/api.ts`: `apiGet<T>(path, signal)` — same-origin `fetch` (no base
   URL, exactly as `lib/health.ts:24` does), `Authorization: Bearer` from
   `getSessionToken()`, `401` → `clearSessionToken()` and a typed
@@ -287,7 +288,8 @@ prerequisite for everything; WS3–WS6 are independent of each other.
 
 **WS2 — Home goes live.** Replace the hardcoded stats array with values from
 `useLearnerProfile()` + `useSessions()`; replace the hardcoded card literal with
-deduped session rows (Open Question 5); wire `Progreso` / `Historial` /
+session rows deduped most-recent-per-`theme_domain`, capped at six from a
+`limit=20` pull (OQ5); wire `Progreso` / `Historial` /
 `Ajustes` / avatar / "ver todo →" to `navigate()`; delete `showProximamente` and
 the toast. Loading renders the existing `—` placeholders (already the visual
 language for "no value"), so there is no layout shift.
@@ -323,12 +325,13 @@ compact four-chip mode selector plus an optional topic input near the CTA;
 clicking a recent-topic card starts a session with that `theme_domain` as the
 topic.
 
-**WS7 — Tests + CI.** Per Open Question 4: `vitest` dev dependency, a `test`
-script, unit tests over `lib/format.ts` and `lib/api.ts`, and a `npm test` step
-in the existing CI `web` job.
+**WS7 — Tests + CI.** `vitest` dev dependency, a `test` script, unit tests over
+`lib/format.ts` and `lib/api.ts` (pure logic only — no jsdom, no component
+rendering), and a `npm test` step in the existing CI `web` job.
 
-No Python changes are anticipated in any workstream. No new runtime
-dependencies beyond (possibly) the router decision in Open Question 1.
+No Python changes are anticipated in any workstream, and **no new runtime
+dependency** — the router is in-repo (OQ1) and `vitest` is dev-only (OQ4), so
+`web/package.json`'s runtime deps stay `react` + `react-dom`.
 
 ### Confidence
 
@@ -342,16 +345,16 @@ is already open in both environments (`Caddyfile` `handle /api/*`,
 client-side; the mode/topic contract needs no server change. There is no new
 persistence, no migration, and no new provider dependency.
 
-What holds this at Medium is not feasibility but three things. First, four of
-the five Open Questions materially change the shape of the work (router
-dependency, picker in-or-out, test runner, card dedup) and are unresolved.
-Second, this is the first spec in the series that is substantially *design*
-work — three net-new screens whose layout and Spanish copy are invented here,
-not derived from an existing artifact, and there is no design reference for
-them the way `Home`/`Session` came from the ported #046 designs. Third, no
-screen has ever been rendered against a populated learner database, so the
-payloads' *practical* sufficiency (are ten `top_vocab` lemmas interesting? does
-`band_history` have enough rows to look like a timeline?) is untested.
+What holds this at Medium is not feasibility but two things — the third,
+unresolved Open Questions, was closed at approval (2026-07-25) and no longer
+applies. First, this is the first spec in the series that is substantially
+*design* work: three net-new screens whose layout and Spanish copy are invented
+here, not derived from an existing artifact, and with no design reference the
+way `Home`/`Session` came from the ported #046 designs. Second, no screen has
+ever been rendered against a populated learner database, so the payloads'
+*practical* sufficiency (are ten `top_vocab` lemmas interesting? does
+`band_history` have enough rows to look like a timeline?) is untested — which
+is what validation step 2 exists to settle before any screen is built.
 
 Notably, unlike #016–#024, the deferred-live-spike problem mostly does **not**
 apply here: `require_cloud_secrets` (`api/main.py:53`) only checks truthiness,
@@ -360,15 +363,16 @@ locally with placeholder OpenAI/Cartesia values. Only `warmup_llm` — a
 1-token Anthropic ping that gates `app.state.ready` — needs a real key, and it
 affects only the `/health`-driven CTA state, not any `/api/learner*` screen.
 
-**Validate before proceeding:**
-1. Resolve Open Questions 1–5 with the owner (each is a one-line decision).
-2. Seed a development database with a realistic spread — several sessions across
+**Validate before proceeding:** (item 1 — resolving Open Questions 1–5 — was
+completed at approval on 2026-07-25; the two remaining items stand.)
+
+1. Seed a development database with a realistic spread — several sessions across
    at least two bands, one with `ended_at IS NULL`, a couple of band changes,
    and enough turns for non-empty `top_errors`/`top_vocab` — then `curl` all
    three endpoints and confirm the payloads support the screens as specced
    before building them. A script under `scripts/` or a `pytest` fixture reused
    as a seeder is fine; this is throwaway.
-3. Confirm the local dev loop end to end: API booted with a real
+2. Confirm the local dev loop end to end: API booted with a real
    `ANTHROPIC_API_KEY` + placeholder OpenAI/Cartesia values, `npm run dev`, and
    an authenticated `/api/learner` response rendering in the browser. If this
    works, the remaining live-spike deferral is limited to the deployed-host
@@ -379,9 +383,8 @@ affects only the `/health`-driven CTA state, not any `/api/learner*` screen.
 - **Client-side derivation over new endpoints.** Streak, duration, relative
   time, and topic dedup are all computed in the browser from #019's raw rows.
   This honors #019's Open Question 4 resolution and keeps a UI presentation
-  choice out of the API contract. The cost is that the logic is untested unless
-  Open Question 4 lands on Vitest — which is exactly why the recommendation is
-  to add it.
+  choice out of the API contract. The cost is that this logic would otherwise be
+  wholly untested — which is exactly why OQ4 resolved to add Vitest for it.
 - **Per-surface failure, not per-page.** Each hook owns its own error state.
   Home reads two endpoints; one failing must degrade one region. This is the
   difference between a page that looks broken and a page that looks honest.
@@ -404,7 +407,7 @@ The Python suite (469 tests, `pytest`) is untouched — no backend change is in
 scope, and #019's `tests/test_learner_api.py` already covers the endpoints these
 screens consume, including the fresh-DB neutral-response and `401` cases.
 
-**Frontend unit tests** (Vitest, pending Open Question 4) over pure logic only:
+**Frontend unit tests** (Vitest, per OQ4) over pure logic only:
 
 - `computeStreak` — zero sessions → 0; sessions today and yesterday → 2; two
   sessions on the same day → counts once; a gap day breaks the streak; a session
@@ -420,9 +423,9 @@ screens consume, including the fresh-DB neutral-response and `401` cases.
 - Topic dedup — most-recent-per-`theme_domain`, capped at six, in order.
 
 **Build gate:** the existing CI `web` job (`tsc --noEmit && vite build`)
-continues to gate every PR, extended with `npm test` if Vitest lands.
+continues to gate every PR, extended with a `npm test` step.
 
-**Manual verification checklist** against a seeded database (validation step 2
+**Manual verification checklist** against a seeded database (validation step 1
 above), recorded in the decision record:
 
 1. Fresh DB, zero sessions — Home tiles, card strip, Progreso, and Historial all
