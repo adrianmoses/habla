@@ -3,9 +3,10 @@
 | Field | Value |
 |---|---|
 | id | 020 |
-| status | approved |
+| status | implemented |
 | created | 2026-07-25 |
 | approved | 2026-07-25 |
+| decision | [decision.md](./decision.md) |
 
 ---
 
