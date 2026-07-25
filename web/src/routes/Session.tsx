@@ -5,10 +5,15 @@ import { CloseIcon, MicIcon, PauseIcon, PlayIcon } from '../components/icons';
 import { VoiceClient } from '../voice/client';
 import { useAmplitude } from '../voice/amplitude';
 import { clearSessionToken, getSessionToken } from '../lib/token';
+import { useLearnerProfile } from '../lib/learner';
+import { formatMode } from '../lib/format';
+import { pushSessionEntry, useBackHandler } from '../lib/router';
+import type { SessionRequest } from '../voice/types';
 
 type ExitReason = 'user' | 'error';
 
 type Props = {
+  request: SessionRequest;
   onExit: (reason: ExitReason, msg?: string) => void;
 };
 
@@ -25,14 +30,28 @@ const iconBtn: CSSProperties = {
   padding: 0,
 };
 
-export default function Session({ onExit }: Props) {
+export default function Session({ request, onExit }: Props) {
   const [paused, setPaused] = useState(false);
   const [elapsedSec, setElapsedSec] = useState(0);
   const [client, setClient] = useState<VoiceClient | null>(null);
 
+  // The band badge renders before this resolves; `A2` stays the pre-load
+  // default so the chrome never flashes empty (spec Key Decision).
+  const profile = useLearnerProfile();
+  const band = profile.data?.band ?? 'A2';
+  const modeLabel = formatMode(request.mode);
+
+  // A session is not a route (spec OQ2), but Back should still leave it — this
+  // gives `popstate` an entry to pop, and the handler exits cleanly.
+  useEffect(() => {
+    pushSessionEntry();
+  }, []);
+  useBackHandler(true, () => onExit('user'));
+
   useEffect(() => {
     const c = new VoiceClient({
       token: getSessionToken(),
+      request,
       onClose: (ev) => {
         if (ev.code === 1000) return;
         if (ev.code === 1008) {
@@ -163,7 +182,23 @@ export default function Session({ onExit }: Props) {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          {/* PLACEHOLDER: static level; real adaptation requires spec #029–#033 */}
+          {modeLabel && (
+            <div
+              style={{
+                padding: '6px 12px',
+                borderRadius: 100,
+                background: 'rgba(200, 116, 84, 0.1)',
+                border: '1px solid rgba(168, 84, 58, 0.25)',
+                fontSize: 11,
+                fontFamily: 'var(--mono)',
+                letterSpacing: '0.12em',
+                textTransform: 'uppercase',
+                color: 'var(--clay-deep)',
+              }}
+            >
+              {modeLabel}
+            </div>
+          )}
           <div
             style={{
               padding: '6px 12px',
@@ -179,7 +214,9 @@ export default function Session({ onExit }: Props) {
             }}
           >
             <span style={{ opacity: 0.5 }}>NIVEL</span>
-            <span style={{ color: 'var(--clay-deep)', fontWeight: 500 }}>A2</span>
+            <span style={{ color: 'var(--clay-deep)', fontWeight: 500 }}>
+              {band}
+            </span>
           </div>
           <button
             type="button"

@@ -1,30 +1,47 @@
 import { useState } from 'react';
 import Home from './routes/Home';
 import Session from './routes/Session';
-
-type Route = 'home' | 'session';
-type AppState = { route: Route; error?: string };
+import Progreso from './routes/Progreso';
+import Historial from './routes/Historial';
+import Ajustes from './routes/Ajustes';
+import { useRoute } from './lib/router';
+import type { SessionRequest } from './voice/types';
 
 export default function App() {
-  const [state, setState] = useState<AppState>({ route: 'home' });
+  const route = useRoute();
+  // The live session is state, not a route (spec OQ2): it holds a microphone
+  // permission and an open paid-API socket, so a reload must never restore it.
+  const [session, setSession] = useState<SessionRequest | null>(null);
+  const [error, setError] = useState<string | undefined>(undefined);
 
-  if (state.route === 'session') {
+  if (session) {
     return (
       <Session
-        onExit={(reason, msg) =>
-          setState({
-            route: 'home',
-            error: reason === 'error' ? msg : undefined,
-          })
-        }
+        request={session}
+        onExit={(reason, msg) => {
+          setSession(null);
+          setError(reason === 'error' ? msg : undefined);
+        }}
       />
     );
   }
 
-  return (
-    <Home
-      onStart={() => setState({ route: 'session' })}
-      error={state.error}
-    />
-  );
+  switch (route) {
+    case 'progreso':
+      return <Progreso />;
+    case 'historial':
+      return <Historial />;
+    case 'ajustes':
+      return <Ajustes />;
+    default:
+      return (
+        <Home
+          onStart={(request) => {
+            setError(undefined);
+            setSession(request);
+          }}
+          error={error}
+        />
+      );
+  }
 }

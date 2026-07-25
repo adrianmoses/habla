@@ -4,6 +4,8 @@
 // Wire protocol: 16 kHz mono 16-bit PCM, raw binary frames both directions.
 // Must be paired with hable_ya.pipeline.serializer.RawPCMSerializer server-side.
 
+import type { SessionRequest } from './types';
+
 const TARGET_RATE = 16000;
 const WORKLET_URL = '/pcm-worklet.js';
 
@@ -12,6 +14,8 @@ export type VoiceStatus = 'idle' | 'connecting' | 'connected' | 'closed' | 'erro
 export type VoiceClientOpts = {
   wsUrl?: string;
   token?: string;
+  /** Conversation mode + optional topic (spec #023). */
+  request?: SessionRequest;
   onStatus?: (status: VoiceStatus) => void;
   onClose?: (ev: CloseEvent) => void;
   onError?: (err: unknown) => void;
@@ -21,6 +25,29 @@ export type VoiceClientOpts = {
 function defaultWsUrl(): string {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   return `${proto}//${location.host}/ws/session`;
+}
+
+/**
+ * Append `?mode=&topic=` when the learner chose something (spec #023).
+ *
+ * Client-only: the server already parses both fail-safe
+ * (`_extract_conversation_config`), so an unknown value degrades to the open
+ * default rather than breaking the handshake. The default open-with-no-topic
+ * request produces the exact URL this client used before #020.
+ */
+function withRequest(url: string, request?: SessionRequest): string {
+  if (!request) return url;
+  const params = new URLSearchParams();
+  if (request.mode !== 'open') params.set('mode', request.mode);
+  const topic = request.topic?.trim();
+  if (topic) {
+    // A topic is meaningless without a mode; `open` + topic is a supported
+    // combination server-side and overrides the random theme pick.
+    if (!params.has('mode')) params.set('mode', request.mode);
+    params.set('topic', topic);
+  }
+  const qs = params.toString();
+  return qs ? `${url}?${qs}` : url;
 }
 
 export class VoiceClient {
@@ -49,7 +76,7 @@ export class VoiceClient {
   );
 
   constructor(opts: VoiceClientOpts = {}) {
-    this.wsUrl = opts.wsUrl ?? defaultWsUrl();
+    this.wsUrl = withRequest(opts.wsUrl ?? defaultWsUrl(), opts.request);
     this.token = opts.token;
     this.onStatus = opts.onStatus;
     this.onClose = opts.onClose;
