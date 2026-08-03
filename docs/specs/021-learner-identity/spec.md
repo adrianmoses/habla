@@ -3,8 +3,9 @@
 | Field | Value |
 |---|---|
 | id | 021 |
-| status | draft |
+| status | approved |
 | created | 2026-08-04 |
+| approved | 2026-08-04 |
 
 ---
 
@@ -119,7 +120,12 @@ part of why it stays a non-goal now.
 
 Three decisions were made before drafting and are treated as settled: storage
 is a DB column with a PATCH endpoint (not a config setting); the name is UI-only
-and never enters the prompt; multi-user is a standing non-goal. What remains:
+and never enters the prompt; multi-user is a standing non-goal.
+
+**All three remaining questions were resolved at their recommended default on
+2026-08-04, at approval.** They are kept below with their reasoning intact —
+the alternatives are what the acceptance criteria are defending against, so
+deleting them would lose why the criteria are phrased as they are.
 
 **OQ1 — PATCH path: `/api/learner` or `/api/learner/profile`?**
 `PATCH /api/learner` is symmetric with `GET /api/learner` and REST-correct: the
@@ -129,6 +135,7 @@ which could argue for a distinct `/profile` sub-resource.
 **Recommend `PATCH /api/learner`** — one resource, one path; the payload
 asymmetry is normal for a computed representation, and a `/profile` child under
 a router already prefixed `/api/learner` reads redundantly.
+**Resolved: `PATCH /api/learner`.**
 
 **OQ2 — What renders when `display_name` is `NULL`?**
 Options: (a) greeting alone, capitalized and terminated (`Buenas tardes.`) with
@@ -139,6 +146,7 @@ exactly the invented-identity defect this spec removes; (c) puts onboarding
 chrome on the main screen for a state most deployments leave within a minute.
 The empty circle still reads as an avatar and still navigates to Ajustes, where
 the field is.
+**Resolved: (a) — greeting alone, blank avatar circle.**
 
 **OQ3 — Validation bounds.**
 Proposed: trim surrounding whitespace; reject if the trimmed value exceeds **40
@@ -150,6 +158,8 @@ so there is no injection surface to defend with a regex. React escapes on
 render.
 **Recommend as proposed.** 40 characters fits the 96px serif greeting without
 wrapping past two lines at the SPA's `maxWidth: 520`.
+**Resolved: as proposed — trim, ≤40 characters, no `Cc`/`Cf`, empty means
+clear.**
 
 ---
 
