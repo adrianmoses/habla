@@ -1,12 +1,17 @@
 """TurnIngestService — one transaction per ``log_turn`` observation.
 
-Composes the learner-state writes (turn row, error observations, error
-counts, vocabulary items, AGE graph upserts) inside a single
-``conn.transaction()`` so the relational aggregates never drift from the
-graph. Called from the tool handler on the happy path of every validated
-``log_turn`` call; failures are logged + counted (on the sink's
-``ingest_failed``) rather than propagated, so a DB outage never takes
-down the live session.
+Composes the relational learner-state writes (turn row, error observations,
+error counts, vocabulary items) inside a single ``conn.transaction()``. Called
+from the tool handler on the happy path of every validated ``log_turn`` call;
+failures are logged + counted (on the sink's ``ingest_failed``) rather than
+propagated, so a DB outage never takes down the live session.
+
+Spec 022: the AGE graph upserts run *after* that transaction commits, and are
+best-effort — the graph is an inspection artifact that no adaptation reads, so
+a cypher failure must not discard relational state that is genuinely
+load-bearing. Failures bump the sink's ``graph_failed``. The consequence is
+that graph and relational state can now drift under failure; that is the
+intended trade, and ``graph_failed`` is how it stays visible.
 
 Spec 049: ``end_session`` also runs the placement / leveling decision
 through :class:`LevelingService`. Failures there are logged but never
@@ -72,10 +77,35 @@ class TurnIngestService:
                 lemmas = await VocabularyRepo.record(
                     conn, utterance=obs.learner_utterance, at=at
                 )
-                for category in set(categories):
-                    await graph.upsert_error_pattern(conn, category=category, at=at)
-                for lemma in lemmas:
-                    await graph.upsert_vocab(conn, lemma=lemma, at=at)
+            # Graph upserts run *after* the relational commit, best-effort
+            # (spec #022, OQ2). They were inside the transaction until the
+            # graph's role was settled: it is an inspection artifact, read by
+            # nothing that adapts, so letting a cypher failure discard a turn's
+            # real learner state traded something load-bearing for something
+            # decorative. Measured at ~3ms and ~59% of the transaction, the
+            # move costs no latency — it is about what a failure may destroy.
+            await self._upsert_graph(conn, categories=categories, lemmas=lemmas, at=at)
+
+    async def _upsert_graph(
+        self,
+        conn: asyncpg.Connection,
+        *,
+        categories: list[str],
+        lemmas: list[str],
+        at: datetime,
+    ) -> None:
+        """Best-effort AGE upserts; logged and counted, never raised."""
+        try:
+            for category in set(categories):
+                await graph.upsert_error_pattern(conn, category=category, at=at)
+            for lemma in lemmas:
+                await graph.upsert_vocab(conn, lemma=lemma, at=at)
+        except Exception:
+            logger.warning(
+                "graph upsert failed; relational state committed", exc_info=True
+            )
+            if self._sink is not None:
+                self._sink.graph_failed += 1
 
     async def start_session(
         self,

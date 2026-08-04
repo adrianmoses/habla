@@ -151,8 +151,8 @@ SELECT * FROM learner_profile;
 SELECT * FROM sessions ORDER BY started_at DESC LIMIT 5;
 
 -- Recent turns (log_turn observations land here)
-SELECT id, session_id, created_at, cefr_band, l1_reliance_score
-FROM turns ORDER BY created_at DESC LIMIT 20;
+SELECT id, session_id, timestamp, cefr_band, fluency_signal, l1_used
+FROM turns ORDER BY timestamp DESC LIMIT 20;
 
 -- Error patterns accumulated across sessions
 SELECT * FROM error_counts ORDER BY count DESC LIMIT 20;
@@ -161,7 +161,11 @@ SELECT * FROM error_counts ORDER BY count DESC LIMIT 20;
 SELECT * FROM vocabulary_items ORDER BY last_seen_at DESC LIMIT 20;
 ```
 
-Knowledge graph (Apache AGE — graph name is `learner_knowledge`):
+Knowledge graph (Apache AGE — graph name is `learner_knowledge`). It is written
+every turn but **read by nothing that adapts** — every adaptive decision comes
+from the relational tables above. Treat it as an inspection artifact; spec #022
+records why, and `GET /dev/learner` returns a `graph` block with the same counts
+these queries produce.
 
 ```sql
 -- List graphs in the database

@@ -85,6 +85,12 @@ class TurnObservationSink:
         # fails (e.g. DB unavailable mid-session). Same posture as
         # ingest_failed — exception is logged, not raised.
         self.leveling_failed: int = 0
+        # Spec 022: incremented when the best-effort AGE graph upserts fail
+        # after the relational transaction has already committed. The graph is
+        # an inspection artifact, not an input to adaptation, so a failure is
+        # survivable — but it must not be *silent*, or the day the writes stop
+        # nothing would ever say so.
+        self.graph_failed: int = 0
 
     @property
     def path(self) -> Path:

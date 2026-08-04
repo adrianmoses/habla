@@ -45,6 +45,7 @@ from datetime import UTC, datetime, timedelta
 import asyncpg
 
 from hable_ya.db import close_pool, open_pool
+from hable_ya.learner import graph as learner_graph
 
 logger = logging.getLogger("seed_dev_learner")
 
@@ -181,6 +182,33 @@ async def _seed_sessions(conn: asyncpg.Connection, now: datetime) -> None:
                 )
 
 
+async def _seed_graph(conn: asyncpg.Connection, now: datetime) -> None:
+    """Mirror the seeded aggregates into the AGE graph (spec #022).
+
+    The rest of this script writes tables directly, bypassing
+    `TurnIngestService` — which would leave the graph empty and
+    `/dev/learner`'s graph block permanently at zero on a seeded database,
+    making the one graph reader impossible to eyeball.
+
+    Goes through the real writers rather than raw cypher, so what a developer
+    inspects is what the runtime would have produced. Counts differ from the
+    relational ones by design: the writers increment per call, so this seeds
+    presence and shape, not magnitude.
+    """
+    await learner_graph.ensure_learner_node(conn)
+    await learner_graph.ensure_scenario_nodes(conn)
+    for category, _count, days_ago in _ERROR_COUNTS:
+        await learner_graph.upsert_error_pattern(
+            conn, category=category, at=_at(now, days_ago)
+        )
+    for lemma, _sample, _count, days_ago in _VOCAB:
+        await learner_graph.upsert_vocab(conn, lemma=lemma, at=_at(now, days_ago))
+    for days_ago, domain, band, _mode, _turns, _ended in _SESSIONS:
+        await learner_graph.link_session_to_scenario(
+            conn, scenario_domain=domain, band=band, at=_at(now, days_ago)
+        )
+
+
 async def _seed_aggregates(conn: asyncpg.Connection, now: datetime) -> None:
     for category, count, days_ago in _ERROR_COUNTS:
         await conn.execute(
@@ -261,10 +289,20 @@ async def amain(reset: bool) -> int:
             if reset:
                 logger.info("Truncating learner tables")
                 await conn.execute(TRUNCATE_SQL)
+                # The graph too (spec #022) — TRUNCATE does not touch AGE, so
+                # without this a reseed leaves stale nodes behind and
+                # /dev/learner's graph block contradicts the relational data
+                # right beside it.
+                logger.info("Clearing the AGE graph")
+                await conn.execute(
+                    f"SELECT * FROM cypher('{learner_graph.GRAPH}', $$ "
+                    f"MATCH (n) DETACH DELETE n $$) AS (v ag_catalog.agtype)"
+                )
             async with conn.transaction():
                 await _seed_sessions(conn, now)
                 await _seed_aggregates(conn, now)
                 await _seed_bands(conn, now)
+                await _seed_graph(conn, now)
             turns = await conn.fetchval("SELECT count(*) FROM turns")
             sessions = await conn.fetchval("SELECT count(*) FROM sessions")
         logger.info("Seeded %s sessions / %s turns", sessions, turns)

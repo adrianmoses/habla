@@ -8,7 +8,8 @@ Mounted only when ``settings.dev_endpoints_enabled`` is true.
   log_turn emission rate and the learner-DB write health in real time.
 * ``GET /dev/learner`` (#029) — current profile snapshot, top errors + vocab,
   recent theme domains; correlates with ``/dev/observations`` so a reviewer
-  can see the profile update produced by each turn.
+  can see the profile update produced by each turn. Since #022 it also carries
+  a ``graph`` block — the AGE graph's only reader in the codebase.
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
-from hable_ya.learner import read
+from hable_ya.learner import graph, read
 
 router = APIRouter()
 
@@ -36,6 +37,7 @@ async def get_observations(
         "ingest_failed": getattr(sink, "ingest_failed", 0),
         "band_missing": getattr(sink, "band_missing", 0),
         "leveling_failed": getattr(sink, "leveling_failed", 0),
+        "graph_failed": getattr(sink, "graph_failed", 0),
         "observations": [asdict(obs) for obs in sink.recent(n)],
     }
 
@@ -60,6 +62,11 @@ async def get_learner(request: Request) -> dict[str, Any]:
             """,
             DEV_LEARNER_RECENT_TURNS,
         )
+        # Spec #022: the graph's only reader. Nothing adapts on this — it is
+        # here so the graph is a verifiable artifact rather than a write-only
+        # sink, and so its node-level counters can be eyeballed against the
+        # relational `top_vocab` / `top_errors` above them in this payload.
+        graph_summary = await graph.graph_summary(conn)
     top_errors = payload.pop("top_errors")
     top_vocab = payload.pop("top_vocab")
     recent_theme_domains = payload.pop("recent_theme_domains")
@@ -76,4 +83,5 @@ async def get_learner(request: Request) -> dict[str, Any]:
             }
             for r in recent_turn_rows
         ],
+        "graph": graph_summary,
     }

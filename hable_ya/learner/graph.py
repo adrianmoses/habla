@@ -16,9 +16,11 @@ transaction.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from datetime import datetime
+from typing import Any
 
 import asyncpg
 
@@ -48,6 +50,51 @@ async def _run_cypher(conn: asyncpg.Connection, body: str) -> None:
     await conn.execute(
         f"SELECT * FROM cypher('{GRAPH}', $$ {body} $$) AS (v ag_catalog.agtype)"
     )
+
+
+def _agtype(value: Any) -> Any:
+    """Decode one AGE ``agtype`` column into a Python value.
+
+    asyncpg has no codec for ``agtype``, so every column arrives as ``str`` —
+    and string values keep their JSON quoting: ``label(n)`` comes back as
+    ``'"Learner"'``, a count as ``'1'``. ``json.loads`` handles both, which is
+    why it is used rather than ``int(str(...))`` — that works for counts and
+    silently mangles labels.
+
+    Vertices and edges stringify with an ``::vertex`` / ``::edge`` suffix that
+    is not valid JSON; nothing here returns whole nodes (only scalars), so
+    those fall through to the raw string rather than raising.
+    """
+    try:
+        return json.loads(str(value))
+    except (TypeError, ValueError):
+        return value
+
+
+async def _fetch_cypher(
+    conn: asyncpg.Connection, body: str, *columns: str
+) -> list[dict[str, Any]]:
+    """Run a read-only cypher body and return decoded rows (spec #022).
+
+    ``_run_cypher`` uses ``conn.execute`` and so cannot return rows — reads
+    need their own primitive. AGE requires the result columns to be declared in
+    the ``AS (...)`` clause, which is why they are a parameter rather than
+    inferred.
+
+    ``columns`` are interpolated into SQL, so they are call-site literals only:
+    every caller in this module passes fixed names. They are filtered through
+    :func:`_safe` anyway, on the same principle as the writers — the filter is
+    cheap and the day someone threads a variable through here, it holds.
+    """
+    for column in columns:
+        if _safe(column) is None:
+            logger.warning("refusing cypher read — unsafe column name: %r", column)
+            return []
+    declared = ", ".join(f"{c} ag_catalog.agtype" for c in columns)
+    rows = await conn.fetch(
+        f"SELECT * FROM cypher('{GRAPH}', $$ {body} $$) AS ({declared})"
+    )
+    return [{c: _agtype(row[c]) for c in columns} for row in rows]
 
 
 async def ensure_learner_node(conn: asyncpg.Connection) -> None:
@@ -163,3 +210,72 @@ async def link_session_to_scenario(
         SET r.last_at = '{safe_at}'
         """,
     )
+
+
+# --------------------------------------------------------------------------- #
+# Reads (spec #022)
+#
+# The graph is an inspection artifact: nothing here feeds adaptation, which is
+# relational (`learner/read.py`, `aggregations.py`, `leveling/policy.py`). This
+# exists so the graph is a *verifiable* artifact rather than a write-only sink
+# — without a read, nothing would ever detect the day the writers stop.
+# --------------------------------------------------------------------------- #
+
+#: Labels the writers above create. Reported even at zero, so a label that
+#: stopped being written reads as `0` rather than vanishing from the payload.
+KNOWN_LABELS = ("Learner", "Scenario", "VocabItem", "ErrorPattern")
+
+#: Edge types the writers above create. Same zero-reporting rule.
+KNOWN_EDGES = ("PRODUCED", "MADE_ERROR", "ENGAGED_WITH")
+
+TOP_NODES = 10
+
+
+async def graph_summary(conn: asyncpg.Connection) -> dict[str, Any]:
+    """Node/edge counts and the top counter-bearing nodes.
+
+    The top-node counters are the ones stored *on the node*
+    (``v.production_count``, ``e.occurrences``), which duplicate
+    ``vocabulary_items.production_count`` and ``error_counts.count``. That
+    duplication is deliberately surfaced rather than hidden: it is the concrete
+    shape of the modelling problem #021 Key Decision 4 recorded, and an
+    operator comparing the two side by side is how it stays visible.
+    """
+    label_rows = await _fetch_cypher(
+        conn, "MATCH (n) RETURN label(n) AS label, count(*) AS n", "label", "n"
+    )
+    edge_rows = await _fetch_cypher(
+        conn, "MATCH ()-[r]->() RETURN type(r) AS type, count(*) AS n", "type", "n"
+    )
+    vocab = await _fetch_cypher(
+        conn,
+        f"""
+        MATCH (v:VocabItem)
+        RETURN v.lemma AS lemma, v.production_count AS n
+        ORDER BY v.production_count DESC LIMIT {TOP_NODES}
+        """,
+        "lemma",
+        "n",
+    )
+    errors = await _fetch_cypher(
+        conn,
+        f"""
+        MATCH (e:ErrorPattern)
+        RETURN e.category AS category, e.occurrences AS n
+        ORDER BY e.occurrences DESC LIMIT {TOP_NODES}
+        """,
+        "category",
+        "n",
+    )
+
+    seen_labels = {str(r["label"]): int(r["n"]) for r in label_rows}
+    seen_edges = {str(r["type"]): int(r["n"]) for r in edge_rows}
+    return {
+        "graph": GRAPH,
+        "nodes": {label: seen_labels.get(label, 0) for label in KNOWN_LABELS},
+        "edges": {edge: seen_edges.get(edge, 0) for edge in KNOWN_EDGES},
+        "top_vocab": [{"lemma": r["lemma"], "production_count": r["n"]} for r in vocab],
+        "top_error_patterns": [
+            {"category": r["category"], "occurrences": r["n"]} for r in errors
+        ],
+    }

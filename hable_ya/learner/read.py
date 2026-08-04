@@ -3,9 +3,14 @@ endpoints (spec #019) and the dev `/dev/learner` inspector.
 
 Both surfaces read the same relational learner state; keeping the SQL here
 means they cannot drift. All payloads are JSON-ready: timestamps are ISO-8601
-strings and JSONB is decoded to objects. Nothing here writes, and nothing
-reads the AGE graph (graph reads are spec #022) — adaptivity is relational,
-so is inspection.
+strings and JSONB is decoded to objects. Nothing here writes.
+
+Nothing here reads the AGE graph either, and that is now a settled position
+rather than a pending one: #022 established that **adaptivity is relational**
+and the graph is an inspection artifact. The one graph reader in the codebase
+is ``hable_ya.learner.graph.graph_summary``, surfaced only on the dev-gated
+``/dev/learner``. If a future spec makes the graph load-bearing, this docstring
+is the first thing that should stop being true.
 """
 
 from __future__ import annotations

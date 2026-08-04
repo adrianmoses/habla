@@ -1,0 +1,24 @@
+{
+  "spec": "022-knowledge-graph-read",
+  "iterations": 50,
+  "corpus_size": 3,
+  "stages_ms": {
+    "relational": {
+      "n": 50,
+      "p50": 2.2214920027181506,
+      "p95": 2.774486679118126,
+      "mean": 2.250625106971711
+    },
+    "graph": {
+      "n": 50,
+      "p50": 3.1347110052593052,
+      "p95": 4.02929229894653,
+      "mean": 3.195293832104653
+    }
+  },
+  "derived": {
+    "graph_share_of_transaction_pct": 58.52487294806618,
+    "cypher_round_trips_mean": 13.36,
+    "cypher_round_trips_max": 14.0
+  }
+}
