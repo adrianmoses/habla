@@ -197,20 +197,30 @@ export function vocabByProduction(items: VocabItem[]): VocabItem[] {
  * clay-deep `<em>` on its own line — flattening it to a sentence would lose
  * the accent that makes the greeting the hero.
  *
- * With a name: `buenas tardes,` + the name (the lowercase greeting is the
- * existing house style). Without one: `Buenas tardes.` alone — capitalized and
- * terminated, claiming nothing. A neutral placeholder word would just
+ * With a name: `buenas tardes,` + the **first** name (the lowercase greeting is
+ * the existing house style). Without one: `Buenas tardes.` alone — capitalized
+ * and terminated, claiming nothing. A neutral placeholder word would just
  * reintroduce the invented identity this spec removes.
+ *
+ * Only the first word, because the hero is 96px serif in a `1.2fr` grid column:
+ * browser verification showed a full 40-character name wrapping to **five**
+ * lines and pushing the CTA below the fold. (#021's OQ3 justified the
+ * 40-character bound against `maxWidth: 520`, which is on the paragraph
+ * beneath the hero, not on the hero itself.) Greeting someone by their first
+ * name is also simply what a person does; the full name is what Ajustes edits
+ * and what the avatar initial comes from.
  */
 export function greetingLine(
   time: string,
   name: string | null,
 ): { lead: string; name: string | null } {
-  if (name === null || name === '') {
+  const trimmed = name?.trim() ?? '';
+  if (trimmed === '') {
     const head = Array.from(time)[0] ?? '';
     return { lead: head.toUpperCase() + time.slice(head.length) + '.', name: null };
   }
-  return { lead: time + ',', name };
+  const first = trimmed.split(/\s+/)[0] ?? trimmed;
+  return { lead: time + ',', name: first };
 }
 
 /**
