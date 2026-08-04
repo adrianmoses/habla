@@ -3,8 +3,9 @@
 | Field | Value |
 |---|---|
 | id | 022 |
-| status | draft |
+| status | approved |
 | created | 2026-08-04 |
+| approved | 2026-08-04 |
 
 ---
 
@@ -145,6 +146,12 @@ Under the recommended branch (honest downgrade), additionally:
 
 ### Open Questions
 
+**All four were resolved at their recommended default on 2026-08-04, at
+approval** — except OQ2, whose resolution *is* to decide after the measurement
+the Approach requires (see below). They are kept with their reasoning intact:
+the alternatives are what the acceptance criteria defend against, so deleting
+them would lose why the criteria are phrased as they are.
+
 **OQ1 — Adaptation, or honest downgrade?** The central question.
 
 *Adaptation* means wiring graph reads into theme or prompt selection — the
@@ -170,6 +177,10 @@ been applying: remove the false claim first, and let a real need justify the
 feature later. The graph keeps accumulating data, so the optionality is not
 lost — a future spec can still query five months of history. What is lost is
 only the implication that it is doing something today.
+**Resolved: honest downgrade.** The validation steps still run first — if the
+candidate-query table (Approach step 2) turns up a query the current graph can
+answer and SQL cannot, that is a finding worth surfacing before the doc edits
+land, and it belongs in the decision record either way.
 
 **OQ2 — Keep, move, or drop the per-turn writes?**
 (a) keep them where they are; (b) move them out of the ingest transaction so a
@@ -183,6 +194,11 @@ exists because latency in this path is a known concern.
 **Recommend deciding after measuring**, with a bias to (b) if the cost is
 non-trivial: graph writes are decorative under the downgrade, so they should
 not be able to fail a turn's real persistence.
+**Resolved: decide at Approach step 1, from the measurement.** This is a
+deliberate deferral, not an unresolved question — the decision has an owner
+(the implementer), an input (the measured cost), and a default (leave them in
+place if the graph portion is a small fraction of the ingest transaction).
+Whichever way it goes, the number and the reasoning go in the decision record.
 
 **OQ3 — Where does the inspection read live?**
 (a) extend the existing dev-gated `/dev/learner`; (b) a new `/dev/graph`;
@@ -192,6 +208,7 @@ not be able to fail a turn's real persistence.
 production so the two cannot drift. A graph block on the payload it already
 returns is the smallest honest surface. (b) is defensible if the graph view
 grows past a few counts.
+**Resolved: (a) — a graph block on `/dev/learner`.**
 
 **OQ4 — Does the README-snippet test cover cypher as well as SQL?**
 The SQL blocks are straightforward to execute against the test database. The
@@ -200,6 +217,9 @@ cypher blocks need `ag_catalog` on the `search_path` and one of them is a
 **Recommend covering both**, with the extractor skipping statements marked by
 an HTML comment — an explicit opt-out beats a test that silently checks half
 the file.
+**Resolved: both, with an explicit opt-out marker.** If a snippet needs an
+opt-out, the marker must say *why* — an unexplained skip is how the `turns`
+query survived.
 
 ---
 
