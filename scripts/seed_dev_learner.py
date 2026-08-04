@@ -29,6 +29,9 @@ Deliberate properties the frontend needs to exercise:
   (`hable_ya/tools/schema.py`), so the UI must survive whatever Claude writes.
 - More than 20 turns, since `l1_reliance` / `speech_fluency` are computed over a
   trailing 20-turn window (`hable_ya/learner/profile.py`).
+- An **accented `display_name`** (`Ángela`, spec #021), so the seeded DB shows
+  the populated greeting rather than only the empty state, and the avatar
+  initial is exercised on a non-ASCII first code point.
 """
 
 from __future__ import annotations
@@ -240,7 +243,8 @@ async def _seed_bands(conn: asyncpg.Connection, now: datetime) -> None:
            SET band = 'B1',
                sessions_completed = $1,
                stable_sessions_at_band = 4,
-               last_band_change_at = $2
+               last_band_change_at = $2,
+               display_name = 'Ángela'
          WHERE id = 1
         """,
         len(_SESSIONS),

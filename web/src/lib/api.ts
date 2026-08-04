@@ -1,4 +1,4 @@
-// Client for the #019 learner-progress read API.
+// Client for the #019 learner-progress API — read, plus #021's one write.
 //
 // Same-origin `fetch` with no base URL — exactly as `lib/health.ts` hits
 // `/health` — so it works in dev (Vite proxies `/api` → :8000) and in prod
@@ -35,6 +35,38 @@ export async function apiGet<T>(path: string, signal?: AbortSignal): Promise<T> 
   const res = await fetch(path, {
     signal,
     headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+  });
+
+  if (res.status === 401) {
+    clearSessionToken();
+    throw new UnauthorizedError();
+  }
+  if (!res.ok) throw new ApiError(res.status);
+
+  return (await res.json()) as T;
+}
+
+/**
+ * PATCH with a JSON body — the write half of the API (spec #021).
+ *
+ * Same auth header and the same 401 recovery as `apiGet`, deliberately: a
+ * rotated token has to drop the operator back to the paste prompt identically
+ * whether they were reading or writing.
+ */
+export async function apiPatch<T>(
+  path: string,
+  body: unknown,
+  signal?: AbortSignal,
+): Promise<T> {
+  const token = getSessionToken();
+  const res = await fetch(path, {
+    method: 'PATCH',
+    signal,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(body),
   });
 
   if (res.status === 401) {

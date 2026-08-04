@@ -12,6 +12,7 @@ import {
   formatDuration,
   formatMode,
   formatRelative,
+  greetingLine,
   MODE_OPTIONS,
 } from '../lib/format';
 import {
@@ -90,6 +91,7 @@ export default function Home({ onStart, error }: Props) {
   const streak = computeStreak(rows);
   const topics = dedupeTopics(rows);
   const p = profile.data;
+  const hello = greetingLine(time, p?.display_name ?? null);
 
   const start = (override?: string) => {
     const chosen = (override ?? topic).trim();
@@ -133,11 +135,13 @@ export default function Home({ onStart, error }: Props) {
               marginBottom: 20,
             }}
           >
-            {time},
-            <br />
-            {/* PLACEHOLDER: learner name; the profile has no name field until
-                spec #021 decides the identity model. */}
-            <em style={{ color: 'var(--clay-deep)' }}>Ana</em>.
+            {hello.lead}
+            {hello.name !== null && (
+              <>
+                <br />
+                <em style={{ color: 'var(--clay-deep)' }}>{hello.name}</em>.
+              </>
+            )}
           </h1>
           <p
             style={{

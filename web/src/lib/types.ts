@@ -36,6 +36,9 @@ export type VocabItem = {
 
 export type LearnerProfile = {
   band: CEFRBand;
+  // Null until the learner sets one in Ajustes (spec #021). Null means "not
+  // set" and must render as nothing — never a placeholder name.
+  display_name: string | null;
   sessions_completed: number;
   l1_reliance: number;
   speech_fluency: number;

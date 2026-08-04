@@ -125,12 +125,16 @@ async def clean_learner_state(db_pool: asyncpg.Pool) -> asyncpg.Pool:
             "TRUNCATE error_observations, error_counts, vocabulary_items, "
             "turns, sessions, band_history RESTART IDENTITY CASCADE"
         )
+        # `display_name` is reset too (spec #021): the PATCH tests commit a
+        # name, and without this it would leak into every test that runs after
+        # them.
         await conn.execute(
             "UPDATE learner_profile "
             "SET sessions_completed = 0, "
             "    band = 'A2', "
             "    stable_sessions_at_band = 0, "
-            "    last_band_change_at = NULL "
+            "    last_band_change_at = NULL, "
+            "    display_name = NULL "
             "WHERE id = 1"
         )
         await conn.execute(
