@@ -191,7 +191,8 @@ model changes; anything requiring interpretation lives in the LLM layer.
 
 ```bash
 uv sync --extra analiza
-uv run python -m spacy download es_core_news_sm   # lemmas for TTR/MTLD
+# The Spanish spaCy model (lemmas for TTR/MTLD) is a declared dependency —
+# it arrives with the sync, no `spacy download` step needed.
 # ffmpeg must be on PATH; ANTHROPIC_API_KEY for the examiner pass
 
 uv run analiza grabacion.m4a --tema "mi fin de semana"

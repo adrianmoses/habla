@@ -42,11 +42,10 @@ jobs:
 
       # Skip the `finetune` extra: torch/unsloth are multi-GB and are only
       # needed for model training, which runs in notebooks, not CI.
+      # The Spanish spaCy model is a declared dependency (pinned in uv.lock),
+      # so it arrives with this sync — no separate `spacy download` step.
       - name: Install deps (eval + dev extras)
         run: uv sync --extra eval --extra dev
-
-      - name: Download Spanish spaCy model
-        run: uv run python -m spacy download es_core_news_sm
 
       - name: Wait for Postgres
         run: |
@@ -162,11 +161,6 @@ jobs:
 
       - name: Install Python deps (dev + e2e extras)
         run: uv sync --extra dev --extra e2e
-
-      # spaCy is imported at collection time via the learner package, same as
-      # in `checks`; the browser tests never lemmatize anything.
-      - name: Download Spanish spaCy model
-        run: uv run python -m spacy download es_core_news_sm
 
       - name: Install chromium
         run: uv run playwright install --with-deps chromium
