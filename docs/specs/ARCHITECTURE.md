@@ -225,7 +225,7 @@ The llama.cpp GPU server and the HuggingFace-gated Gemma download were removed i
 - "Baseline" now refers to the **minimal-prompt ablation** (`--minimal-prompt`: role-only system prompt, no register/recast/tool schema), measuring what the runtime prompt engineering buys — not an untuned Gemma checkpoint (#012).
 
 **Scope decisions**
-- **Single-tenant.** The runtime serves one learner per deployment; no tenant isolation, no per-tenant auth, no multi-user session routing.
+- **Single-tenant — a decided non-goal, not an unanswered question.** The runtime serves one learner per deployment (`learner_profile CHECK (id = 1)`); no tenant isolation, no per-tenant auth, no multi-user session routing. Spec #021 settled this and wrote down the reversal cost so it stops being re-derived from the schema: composite `(learner_id, …)` PKs on `error_counts` / `vocabulary_items`, an AGE graph re-model (per-learner counters sit on shared `VocabItem` / `ErrorPattern` nodes) blocked behind #022, a real auth system replacing the shared-secret boolean in `hable_ya/auth.py`, a new global concurrency/cost ceiling in place of #016's single active session, ~41 `WHERE id = 1`-class SQL sites, and login/logout in the SPA. The learner does have a name — `learner_profile.display_name`, nullable, set through `PATCH /api/learner` (#021) — but a name is not an account. See [021-learner-identity](021-learner-identity/spec.md) Key Decision 4.
 - **Knowledge graph storage.** The learner model graph is stored in Apache AGE (Postgres extension), colocated with relational learner state in the same Postgres instance.
 
 **Inferred uncertainties**

@@ -40,9 +40,12 @@ async def profile_payload(pool: asyncpg.Pool) -> dict[str, Any]:
     snapshot = await LearnerProfileRepo(pool).get()
     async with pool.acquire() as conn:
         is_calibrated = await is_calibrated_async(conn)
+        # `display_name` rides along here rather than on the snapshot: the
+        # snapshot feeds the tutor's system prompt, and the name must have no
+        # path to it (spec #021 Key Decision 2).
         profile_extras = await conn.fetchrow(
             """
-            SELECT stable_sessions_at_band, last_band_change_at
+            SELECT stable_sessions_at_band, last_band_change_at, display_name
             FROM learner_profile WHERE id = 1
             """
         )
@@ -82,8 +85,12 @@ async def profile_payload(pool: asyncpg.Pool) -> dict[str, Any]:
     last_change = (
         profile_extras["last_band_change_at"] if profile_extras is not None else None
     )
+    display_name = (
+        profile_extras["display_name"] if profile_extras is not None else None
+    )
     return {
         "band": snapshot.band,
+        "display_name": display_name,
         "sessions_completed": snapshot.sessions_completed,
         "l1_reliance": snapshot.l1_reliance,
         "speech_fluency": snapshot.speech_fluency,

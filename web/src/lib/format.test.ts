@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
+  avatarInitial,
   computeStreak,
   dedupeTopics,
   errorLabel,
   formatDuration,
   formatMode,
   formatRelative,
+  greetingLine,
   toPercent,
   vocabByProduction,
 } from './format';
@@ -244,5 +246,70 @@ describe('toPercent', () => {
     expect(toPercent(1.4)).toBe(100);
     expect(toPercent(-0.2)).toBe(0);
     expect(toPercent(Number.NaN)).toBe(0);
+  });
+});
+
+describe('greetingLine', () => {
+  it('keeps the lowercase house style and adds the name', () => {
+    expect(greetingLine('buenas tardes', 'Ana')).toEqual({
+      lead: 'buenas tardes,',
+      name: 'Ana',
+    });
+  });
+
+  it('capitalizes and terminates the greeting when there is no name', () => {
+    expect(greetingLine('buenas tardes', null)).toEqual({
+      lead: 'Buenas tardes.',
+      name: null,
+    });
+  });
+
+  it('claims nothing when unnamed — no comma, no undefined, no placeholder', () => {
+    const { lead, name } = greetingLine('buenos días', null);
+    expect(lead).not.toContain(',');
+    expect(lead).not.toContain('undefined');
+    expect(lead).not.toContain('null');
+    expect(name).toBeNull();
+    // The old fabricated name must not survive anywhere in the output.
+    expect(lead).not.toContain('Ana');
+  });
+
+  it('capitalizes an accented first letter correctly', () => {
+    expect(greetingLine('épale', null).lead).toBe('Épale.');
+  });
+
+  it('treats an empty name as unset rather than rendering a bare comma', () => {
+    expect(greetingLine('buenas noches', '')).toEqual({
+      lead: 'Buenas noches.',
+      name: null,
+    });
+  });
+
+  it('passes an accented name through untouched', () => {
+    expect(greetingLine('buenas tardes', 'Ángela').name).toBe('Ángela');
+  });
+});
+
+describe('avatarInitial', () => {
+  it('uppercases the first letter', () => {
+    expect(avatarInitial('ana')).toBe('A');
+    expect(avatarInitial('Ana')).toBe('A');
+  });
+
+  it('handles an accented first letter', () => {
+    expect(avatarInitial('Ángela')).toBe('Á');
+    expect(avatarInitial('ángela')).toBe('Á');
+  });
+
+  it('does not split a surrogate pair', () => {
+    const initial = avatarInitial('\u{1F600} Ana');
+    expect(initial).toBe('\u{1F600}');
+    // A naive name[0] would return half a pair, which renders as a tofu box.
+    expect([...initial]).toHaveLength(1);
+  });
+
+  it('is empty when there is no name', () => {
+    expect(avatarInitial(null)).toBe('');
+    expect(avatarInitial('')).toBe('');
   });
 });

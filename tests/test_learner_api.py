@@ -45,6 +45,24 @@ async def _get(
         return await client.get(path, headers=headers)
 
 
+async def _patch(
+    app: FastAPI, path: str, body: object, *, bearer: str | None = None
+) -> httpx.Response:
+    headers = {"Authorization": f"Bearer {bearer}"} if bearer is not None else {}
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        return await client.patch(path, json=body, headers=headers)
+
+
+async def _stored_name(pool: asyncpg.Pool) -> str | None:
+    async with pool.acquire() as conn:
+        value = await conn.fetchval(
+            "SELECT display_name FROM learner_profile WHERE id = 1"
+        )
+    return None if value is None else str(value)
+
+
 # --------------------------------------------------------------------------- #
 # Auth (no DB) — the Bearer gate runs before the handler, so an authorized
 # request with no pool reaches the handler and 503s; unauthorized never does.
@@ -100,6 +118,40 @@ async def test_disabled_bypasses_auth() -> None:
 async def test_token_never_echoed_in_response() -> None:
     r = await _get(_app(pool=None, token=SECRET), "/api/learner", bearer="wrong")
     assert SECRET not in r.text
+
+
+# --------------------------------------------------------------------------- #
+# The write gate (spec #021) — PATCH is the first write on this surface, so it
+# has to fail closed exactly as the reads do, and it must not become a way to
+# mutate state without a token.
+# --------------------------------------------------------------------------- #
+
+
+NAME_BODY = {"display_name": "Ana"}
+
+
+async def test_patch_without_token_is_401() -> None:
+    app = _app(pool=None, token=SECRET)
+    r = await _patch(app, "/api/learner", NAME_BODY)
+    assert r.status_code == 401
+
+
+async def test_patch_with_wrong_token_is_401() -> None:
+    app = _app(pool=None, token=SECRET)
+    r = await _patch(app, "/api/learner", NAME_BODY, bearer="nope")
+    assert r.status_code == 401
+
+
+async def test_patch_fail_closed_when_secret_unset() -> None:
+    app = _app(pool=None, token="")
+    r = await _patch(app, "/api/learner", NAME_BODY, bearer="anything")
+    assert r.status_code == 401
+
+
+async def test_patch_with_correct_token_passes_auth_then_503_without_pool() -> None:
+    app = _app(pool=None, token=SECRET)
+    r = await _patch(app, "/api/learner", NAME_BODY, bearer=SECRET)
+    assert r.status_code == 503
 
 
 # --------------------------------------------------------------------------- #
@@ -289,3 +341,136 @@ async def test_endpoints_503_without_pool() -> None:
     for path in PATHS:
         r = await _get(app, path)
         assert r.status_code == 503
+
+
+# --------------------------------------------------------------------------- #
+# display_name (spec #021) — the read field and the write endpoint.
+# --------------------------------------------------------------------------- #
+
+
+async def test_display_name_is_null_on_fresh_db(
+    clean_learner_state: asyncpg.Pool,
+) -> None:
+    r = await _get(_app(pool=clean_learner_state, disabled=True), "/api/learner")
+    assert r.status_code == 200
+    # Present but null — the SPA must be able to tell "unset" from "missing".
+    assert "display_name" in r.json()
+    assert r.json()["display_name"] is None
+
+
+async def test_patch_sets_name_and_get_returns_it(
+    clean_learner_state: asyncpg.Pool,
+) -> None:
+    app = _app(pool=clean_learner_state, disabled=True)
+    r = await _patch(app, "/api/learner", {"display_name": "Ana"})
+    assert r.status_code == 200
+    # Echoed back so the client can render without a refetch.
+    assert r.json() == {"display_name": "Ana"}
+
+    r = await _get(app, "/api/learner")
+    assert r.json()["display_name"] == "Ana"
+
+
+async def test_patch_trims_surrounding_whitespace(
+    clean_learner_state: asyncpg.Pool,
+) -> None:
+    app = _app(pool=clean_learner_state, disabled=True)
+    r = await _patch(app, "/api/learner", {"display_name": "  Ana  "})
+    assert r.status_code == 200
+    assert r.json()["display_name"] == "Ana"
+    assert await _stored_name(clean_learner_state) == "Ana"
+
+
+@pytest.mark.parametrize("cleared", [None, "", "   ", "\t\n"])
+async def test_patch_clears_name_back_to_sql_null(
+    clean_learner_state: asyncpg.Pool, cleared: str | None
+) -> None:
+    app = _app(pool=clean_learner_state, disabled=True)
+    await _patch(app, "/api/learner", {"display_name": "Ana"})
+
+    r = await _patch(app, "/api/learner", {"display_name": cleared})
+    assert r.status_code == 200
+    assert r.json()["display_name"] is None
+    # SQL NULL, not the empty string — "not set" stays representable.
+    assert await _stored_name(clean_learner_state) is None
+
+
+async def test_patch_with_no_display_name_key_is_422(
+    clean_learner_state: asyncpg.Pool,
+) -> None:
+    app = _app(pool=clean_learner_state, disabled=True)
+    await _patch(app, "/api/learner", {"display_name": "Ana"})
+
+    # An empty body is a mistake, not an instruction to wipe the name.
+    r = await _patch(app, "/api/learner", {})
+    assert r.status_code == 422
+    assert await _stored_name(clean_learner_state) == "Ana"
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "a" * 41,
+        "Ana\x00María",
+        "Ana\x1bMaría",
+        "Ana\u202eMaría",
+    ],
+)
+async def test_patch_rejects_invalid_name_without_persisting(
+    clean_learner_state: asyncpg.Pool, bad: str
+) -> None:
+    app = _app(pool=clean_learner_state, disabled=True)
+    await _patch(app, "/api/learner", {"display_name": "Ana"})
+
+    r = await _patch(app, "/api/learner", {"display_name": bad})
+    assert r.status_code == 422
+    # Validation runs before the write, so the stored value is untouched.
+    assert await _stored_name(clean_learner_state) == "Ana"
+
+
+async def test_patch_accepts_a_name_at_the_length_limit(
+    clean_learner_state: asyncpg.Pool,
+) -> None:
+    name = "a" * 40
+    app = _app(pool=clean_learner_state, disabled=True)
+    r = await _patch(app, "/api/learner", {"display_name": name})
+    assert r.status_code == 200
+    assert await _stored_name(clean_learner_state) == name
+
+
+@pytest.mark.parametrize("name", ["Ángela", "안나", "\U0001f600 Ana"])
+async def test_patch_round_trips_unicode_names(
+    clean_learner_state: asyncpg.Pool, name: str
+) -> None:
+    app = _app(pool=clean_learner_state, disabled=True)
+    r = await _patch(app, "/api/learner", {"display_name": name})
+    assert r.status_code == 200
+
+    r = await _get(app, "/api/learner")
+    assert r.json()["display_name"] == name
+
+
+async def test_display_name_does_not_reach_the_snapshot_fields(
+    clean_learner_state: asyncpg.Pool,
+) -> None:
+    # Structural guarantee behind the byte-identical prompt: the name is read
+    # off the raw profile row, so it must not appear in any snapshot-derived
+    # field that `snapshot_to_profile()` feeds to render.py.
+    app = _app(pool=clean_learner_state, disabled=True)
+    await _patch(app, "/api/learner", {"display_name": "Ana"})
+
+    body = (await _get(app, "/api/learner")).json()
+    assert body["display_name"] == "Ana"
+    assert "Ana" not in body["error_patterns"]
+    assert "Ana" not in body["vocab_strengths"]
+
+
+async def test_singleton_check_still_rejects_a_second_profile_row(
+    clean_learner_state: asyncpg.Pool,
+) -> None:
+    # #021 adds a column; it does not open the door to a second learner.
+    async with clean_learner_state.acquire() as conn:
+        with pytest.raises(asyncpg.PostgresError):
+            await conn.execute(
+                "INSERT INTO learner_profile (id, band) VALUES (2, 'A2')"
+            )

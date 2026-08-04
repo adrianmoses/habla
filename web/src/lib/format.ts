@@ -190,6 +190,41 @@ export function vocabByProduction(items: VocabItem[]): VocabItem[] {
   return [...items].sort((a, b) => b.production_count - a.production_count);
 }
 
+/**
+ * The hero greeting, split so the name keeps its own styling (spec #021).
+ *
+ * Returns parts rather than one string because Home renders the name in a
+ * clay-deep `<em>` on its own line — flattening it to a sentence would lose
+ * the accent that makes the greeting the hero.
+ *
+ * With a name: `buenas tardes,` + the name (the lowercase greeting is the
+ * existing house style). Without one: `Buenas tardes.` alone — capitalized and
+ * terminated, claiming nothing. A neutral placeholder word would just
+ * reintroduce the invented identity this spec removes.
+ */
+export function greetingLine(
+  time: string,
+  name: string | null,
+): { lead: string; name: string | null } {
+  if (name === null || name === '') {
+    const head = Array.from(time)[0] ?? '';
+    return { lead: head.toUpperCase() + time.slice(head.length) + '.', name: null };
+  }
+  return { lead: time + ',', name };
+}
+
+/**
+ * The avatar letter, or an empty string when there is no name.
+ *
+ * `Array.from` rather than `name[0]` so a first character outside the BMP is
+ * not split into half a surrogate pair. An empty return leaves a blank sand
+ * circle, which still reads as an avatar and still navigates to Ajustes.
+ */
+export function avatarInitial(name: string | null): string {
+  if (!name) return '';
+  return (Array.from(name)[0] ?? '').toUpperCase();
+}
+
 /** A 0–1 model signal as a clamped whole percentage. */
 export function toPercent(value: number): number {
   if (!Number.isFinite(value)) return 0;

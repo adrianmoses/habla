@@ -1,17 +1,17 @@
-// Ajustes — connection, agent, and the access token.
+// Ajustes — the learner's name, the connection, the agent, and the token.
 //
-// Deliberately small. The learner has no name and no configurable profile yet
-// (spec #021 owns that), so this holds the two things an operator actually
-// needs: whether the server is reachable, and control over the token that #016
-// gates every request with. Until now the only way to drop a stale token was to
-// edit sessionStorage by hand.
+// Deliberately small: whether the server is reachable, control over the token
+// that #016 gates every request with, and — since #021 — the one thing about
+// the learner that is theirs to set. That name panel is the only write surface
+// in the SPA; before it, setting anything about the learner meant `psql`.
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import AgentCard from '../components/AgentCard';
 import AppShell from '../components/AppShell';
 import { Eyebrow, page, Panel, PageTitle } from '../components/ui';
+import { apiPatch } from '../lib/api';
 import { useHealth } from '../lib/health';
-import { useSessionToken } from '../lib/learner';
+import { useLearnerProfile, useSessionToken } from '../lib/learner';
 import { navigate } from '../lib/router';
 import { clearSessionToken, setSessionToken } from '../lib/token';
 
@@ -27,6 +27,44 @@ export default function Ajustes() {
   const [draft, setDraft] = useState('');
   const hasToken = useSessionToken() !== undefined;
   const [saved, setSaved] = useState(false);
+
+  const profile = useLearnerProfile();
+  const [name, setName] = useState('');
+  const [storedName, setStoredName] = useState<string | null>(null);
+  const [nameSaved, setNameSaved] = useState(false);
+  const [nameError, setNameError] = useState<string | null>(null);
+
+  // `profile.data` only changes on a refetch (mount, or a token change), so
+  // seeding the draft from it cannot stomp on typing mid-edit.
+  useEffect(() => {
+    if (profile.data) {
+      setStoredName(profile.data.display_name);
+      setName(profile.data.display_name ?? '');
+    }
+  }, [profile.data]);
+
+  const nameDirty = name.trim() !== (storedName ?? '');
+
+  const saveName = async () => {
+    setNameError(null);
+    try {
+      // An emptied field is a deliberate clear, so it goes as an explicit
+      // null — "sin nombre" has to stay reachable from here.
+      const trimmed = name.trim();
+      const res = await apiPatch<{ display_name: string | null }>(
+        '/api/learner',
+        { display_name: trimmed === '' ? null : trimmed },
+      );
+      setStoredName(res.display_name);
+      setName(res.display_name ?? '');
+      setNameSaved(true);
+      setTimeout(() => setNameSaved(false), 1600);
+    } catch {
+      // A 401 already cleared the token inside `apiPatch`; App's auth guard
+      // takes it from there. Anything else is worth saying out loud.
+      setNameError('No se pudo guardar. Inténtalo otra vez.');
+    }
+  };
 
   const status = HEALTH_COPY[health] ?? HEALTH_COPY.unknown;
 
@@ -49,10 +87,70 @@ export default function Ajustes() {
       <section style={{ ...page, maxWidth: 720 }}>
         <PageTitle
           title="Ajustes"
-          subtitle="La conexión, la voz de María y tu token de acceso."
+          subtitle="Tu nombre, la conexión, la voz de María y tu token de acceso."
         />
 
         <div style={{ display: 'grid', gap: 24 }}>
+          <Panel>
+            <Eyebrow>Tu nombre</Eyebrow>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && nameDirty) void saveName();
+                }}
+                placeholder="Sin nombre"
+                maxLength={40}
+                autoComplete="off"
+                style={{
+                  flex: 1,
+                  padding: '13px 15px',
+                  borderRadius: 12,
+                  border: '1px solid var(--line)',
+                  background: 'var(--cream-2)',
+                  color: 'var(--ink)',
+                  fontFamily: 'var(--sans)',
+                  fontSize: 14,
+                  outline: 'none',
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => void saveName()}
+                disabled={!nameDirty}
+                style={{
+                  padding: '13px 20px',
+                  borderRadius: 12,
+                  border: 'none',
+                  background: nameDirty ? 'var(--ink)' : 'var(--muted)',
+                  color: 'var(--cream)',
+                  fontFamily: 'var(--sans)',
+                  fontSize: 14,
+                  fontWeight: 500,
+                  cursor: nameDirty ? 'pointer' : 'not-allowed',
+                }}
+              >
+                Guardar
+              </button>
+            </div>
+            <div
+              style={{
+                fontSize: 12,
+                color: nameError ? 'var(--clay-deep)' : 'var(--muted)',
+                fontFamily: nameSaved ? 'var(--mono)' : 'var(--sans)',
+                letterSpacing: nameSaved ? '0.04em' : undefined,
+                marginTop: 14,
+              }}
+            >
+              {nameError ??
+                (nameSaved
+                  ? 'guardado'
+                  : 'Así te saluda la app. Déjalo vacío si prefieres que no te nombre.')}
+            </div>
+          </Panel>
+
           <Panel>
             <Eyebrow>Conexión</Eyebrow>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>

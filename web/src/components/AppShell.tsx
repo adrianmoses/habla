@@ -5,6 +5,8 @@
 // every screen owns its own scroll — this is where that lives.
 
 import type { CSSProperties, ReactNode } from 'react';
+import { avatarInitial } from '../lib/format';
+import { useLearnerProfile } from '../lib/learner';
 import { navigate, type Route } from '../lib/router';
 
 const NAV: readonly { route: Route; label: string }[] = [
@@ -33,6 +35,13 @@ type Props = {
 };
 
 export default function AppShell({ current, children }: Props) {
+  // Fetched here rather than passed in: three of the four screens already load
+  // the profile, and `useApi` has no cache, so this costs a second cheap read
+  // on those. The alternative — a prop threaded through every route — buys that
+  // back at the price of a silently blank avatar whenever a screen forgets it.
+  const profile = useLearnerProfile();
+  const initial = avatarInitial(profile.data?.display_name ?? null);
+
   return (
     <div
       style={{
@@ -92,9 +101,8 @@ export default function AppShell({ current, children }: Props) {
               {label}
             </a>
           ))}
-          {/* The initial is still a placeholder — the learner has no name until
-              spec #021 gives the profile one. It navigates, so at least it is
-              no longer a decorative cursor:pointer. */}
+          {/* Blank until a name is set (#021) — an empty circle claims
+              nothing, and still navigates to where the field lives. */}
           <div
             style={{
               width: 34,
@@ -112,7 +120,7 @@ export default function AppShell({ current, children }: Props) {
             onClick={() => navigate('ajustes')}
             title="Ajustes"
           >
-            A
+            {initial}
           </div>
         </nav>
       </header>
