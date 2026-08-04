@@ -35,13 +35,24 @@ only assert idempotency and table presence. The round-trip written here is the
 suite's first, which means every migration before this one has a `downgrade()`
 that has never been executed.
 
-**Playwright is not available in this environment.** The spec's manual
-verification section assumed it was, "as #020 established — and there found
-three defects no unit test would have". It is not installed here, so the three
-browser checks were not run. Verification instead went end-to-end at the HTTP
-layer against real Postgres. That is a genuine gap in coverage of exactly the
-class of defect #020 warned about, and it is recorded as such below rather than
-papered over.
+**Browser verification was initially skipped on a false premise, then run —
+and it found a defect.** The first pass of this record claimed Playwright was
+unavailable and filed that as a spec gap. That was wrong: Playwright 1.56.0 is
+installed via pipx at `/home/adrian/.local/bin/playwright` with browsers in
+`~/.cache/ms-playwright`. The detection only checked `node_modules/.bin`,
+`web/node_modules/.bin`, the default `python3`, and `npx --no-install` — none of
+which see a pipx user install. #020's "Playwright is available locally" was
+correct all along.
+
+Running the three checks then falsified one of the spec's own claims. OQ3
+justified the 40-character bound as fitting "the 96px serif greeting without
+wrapping past two lines at the SPA's `maxWidth: 520`". `maxWidth: 520` is on
+the `<p>` beneath the hero, not on the `<h1>`, which spans the full `1.2fr`
+grid column — a 40-character name rendered **five** lines and pushed the CTA
+below the fold. `greetingLine` now greets by first name only. This is exactly
+the class of defect #020 credited browser verification with catching, found in
+exactly the way #020 predicted, and it very nearly shipped behind a detection
+error.
 
 ## Decision
 
@@ -122,6 +133,34 @@ The spec did not address this.
 describing behaviour, not prescribing a signature, and the behaviour it
 describes is preserved.
 
+### What the hero does with a long name
+
+Forced by browser verification: a 40-character name rendered five lines and put
+the CTA below the fold.
+
+**Option A: greet by first name only**
+- Pros: two lines at any length; reads the way a person greets; the full name is
+  still stored, still edited in Ajustes, still the source of the avatar initial.
+- Cons: the hero shows something other than what was typed.
+
+**Option B: shrink the hero font past a length threshold**
+- Pros: renders the full name verbatim.
+- Cons: an inconsistent hero scale — the app's most deliberate typographic
+  moment becomes a function of name length.
+
+**Option C: truncate with an ellipsis in the greeting**
+- Pros: predictable single line.
+- Cons: shows the learner a clipped version of their own name, which is a worse
+  version of Option A's cost with none of its readability.
+
+**Option D: lower the stored bound below 40**
+- Pros: no render change.
+- Cons: rejects legitimate full names, and reverses an approved Open Question to
+  work around a layout bug.
+
+**Chosen: A**, confirmed with the human. The bound stays where OQ3 put it; only
+the hero's use of the value changes.
+
 ### Where AppShell gets the name
 
 **Option A: `useLearnerProfile()` inside AppShell**
@@ -199,8 +238,8 @@ bounded to one 40-character field.
 | `display_name: str \| None = Field(default=None, max_length=40)` | `max_length=200` on the model; the 40-character bound enforced in `normalize_display_name` on the trimmed value | The sketch contradicted the spec's own OQ3, which bounds the *trimmed* value. Following the sketch would 422 a valid padded name. |
 | PATCH accepts `{"display_name": "…"}` (empty body unaddressed) | `{}` is a 422; only an explicit `null` clears | Unspecified. With one mutable field, treating an empty body as "clear" makes a malformed request destructive. |
 | `greetingLine(time, name)` → "the greeting with the name" | Returns `{ lead, name }` | A flat string would drop the clay-deep `<em>` and the line break from the hero — a visual regression from a cosmetic helper. Confirmed with the human before building. |
+| OQ3: 40 characters "fits the 96px serif greeting without wrapping past two lines at the SPA's `maxWidth: 520`" | 40 characters still stored and editable, but the **hero greets by first name only** | The premise was false. `maxWidth: 520` is on the paragraph beneath the hero, not the `<h1>`, which spans the full `1.2fr` column. Browser verification measured 5 lines and a CTA below the fold; first-name-only holds two lines at any length. |
 | Migration round-trip test follows "the existing migration tests' pattern" | New `tests/test_learner_display_name_migration.py` drives alembic directly | No such pattern exists in the suite. This is its first upgrade→downgrade test. |
-| Manual verification via Playwright, "available locally as #020 established" | Verified end-to-end over real HTTP against real Postgres; no browser run | Playwright is not installed in this environment. See Spec Gaps Exposed. |
 | `avatarInitial(name)` → `Array.from(name)[0].toUpperCase()` | Same, plus an empty-string guard so `''` behaves as "unset" | `''` and `null` should render identically; the sketch would return `''` anyway, but the guard makes it explicit and testable. |
 
 Everything else was built as written. All 13 acceptance criteria are addressed;
@@ -225,24 +264,29 @@ resolutions (`PATCH /api/learner`; greeting-alone with a blank circle; trim /
    candidate:** extend the round-trip pattern down the whole chain, or delete
    the `downgrade()` bodies and say the migrations are forward-only.
 
-3. **Playwright is not available in this environment**, contrary to the spec's
-   assertion. #020's decision record credits browser verification with finding
-   three defects no unit test would have — including one where a screen invented
-   progress the learner had not made. #021's UI is thinner (two render sites and
-   a form), the pure logic has 10 new Vitest cases, and `tsc --noEmit` + `vite
-   build` pass, but two acceptance criteria are **argued, not observed**:
-   *"Navigating from Ajustes back to Home shows the new name (no manual
-   reload)"* rests on `useApi` refetching on mount, and the 40-character hero
-   wrap at `maxWidth: 520` has not been eyeballed. **This should be re-verified
-   in a browser before the next deploy.**
+3. **OQ3's layout justification was measured against the wrong element**, and
+   nothing in the acceptance criteria would have caught it. The criteria say a
+   named learner "sees it in Home's greeting" — true at five lines with the CTA
+   off-screen. The constraint that actually mattered lived only in OQ3's
+   *rationale*, where it was never turned into a checkable criterion. **Worth
+   generalising:** when a spec justifies a numeric bound with a layout claim,
+   that claim belongs in the acceptance criteria, not the rationale.
 
-4. **The spec did not say where AppShell reads the name from**, and #020's
+4. **Tooling-availability claims in a spec should be verified, not inherited.**
+   This record's first pass asserted Playwright was unavailable and filed it as
+   a gap; the detection was wrong (a pipx install at `~/.local/bin`, invisible to
+   a `node_modules` / `npx --no-install` / default-`python3` check). The cost was
+   nearly shipping the hero defect above. A negative tooling result deserves the
+   same scepticism as a negative test result — check where the tool would
+   actually be, not only where it usually is.
+
+5. **The spec did not say where AppShell reads the name from**, and #020's
    deliberate no-cache hook design makes an avatar in shared chrome cost a
    duplicate fetch on every screen. Not a defect at this scale. **Roadmap
    candidate:** a shared profile read for the SPA, if a second consumer of
    profile-wide data ever lands in the shell.
 
-5. **`ARCHITECTURE.md` remains `status: inferred`** and its component map still
+6. **`ARCHITECTURE.md` remains `status: inferred`** and its component map still
    describes stubs and the deleted `finetune/` package. Only the tenancy bullet
    was corrected here — the rest was out of scope and is still stale.
 
@@ -296,14 +340,14 @@ $ uv run mypy hable_ya/ api/ eval/agent/
 Success: no issues found in 65 source files
 ```
 
-**Frontend — 47 Vitest cases (37 before this spec) and the build gate:**
+**Frontend — 51 Vitest cases (37 before this spec) and the build gate:**
 
 ```
 $ cd web && npm test
  ✓ src/lib/api.test.ts (7 tests) 4ms
- ✓ src/lib/format.test.ts (40 tests) 6ms
+ ✓ src/lib/format.test.ts (44 tests) 6ms
  Test Files  2 passed (2)
-      Tests  47 passed (47)
+      Tests  51 passed (51)
 
 $ npm run build      # tsc --noEmit && vite build
 ✓ 50 modules transformed.
@@ -347,7 +391,45 @@ INFO  [alembic.runtime.migration] Running upgrade c7f3a9b21d84 -> f1e6a742b90c, 
 migrated to head
 ```
 
-**Not run:** the three Playwright checks from the spec's manual verification
-section (empty-state hero, Ajustes→Home propagation without reload, 40-character
-wrap at `maxWidth: 520`). Playwright is not installed in this environment — see
-Spec Gaps Exposed #3.
+**Browser verification (Playwright 1.56.0, chromium, 1440×900)** — the three
+checks from the spec's manual verification section, against the real learner
+router and a seeded dev database. Run *after* the first pass of this record
+wrongly concluded the tool was unavailable; check 3 failed on the first run at
+five lines, and passes here after `greetingLine` switched to first-name-only:
+
+```
+1. EMPTY STATE
+   hero   = 'Buenas noches.'
+   avatar = ''
+   blank avatar navigates -> http://localhost:5173/ajustes
+
+2. SET IN AJUSTES -> HOME (no reload)
+   confirmation shown = True
+   url    = http://localhost:5173/
+   hero   = 'buenas noches,\nÁngela.'
+   avatar = 'Á'
+
+3. 40-CHARACTER NAME AT maxWidth 520
+   hero height = 196px, line-height = 98px
+   rendered lines = 2
+   hero = 'buenas noches,\nMaximiliana.'
+   CTA top = 693px (viewport 900px)
+
+CONSOLE ERRORS: none
+```
+
+The first run of check 3, before the fix:
+
+```
+3. 40-CHARACTER NAME AT maxWidth 520
+   hero height = 490px, line-height = 98px
+   rendered lines = 5
+   hero = 'buenas noches,\nMaximiliana Guadalupe Fernández Ochoa Ru.'
+```
+
+This closes the two acceptance criteria that could not be settled by unit tests:
+*"A learner with no name set sees a greeting with no name and a blank avatar
+circle — never a fabricated name, never the literal `null`"* (check 1, including
+that the blank circle still navigates), and *"Navigating from Ajustes back to
+Home shows the new name (no manual reload)"* (check 2 — `performance.now()`
+confirms the document was never reloaded).

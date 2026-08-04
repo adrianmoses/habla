@@ -22,13 +22,13 @@ WORKDIR /app
 #   --no-install-project install third-party deps only; app source runs from
 #                        /app at runtime, so this layer is code-change-independent.
 COPY pyproject.toml uv.lock ./
+# The Spanish spaCy model comes with this sync: it is a declared direct-URL
+# dependency (see pyproject), not a separate `spacy download` step, so it lands
+# in the venv site-packages and travels with the venv COPY below. Without it
+# hable_ya/learner/vocabulary.py silently records no vocabulary ([]) — which is
+# why it is pinned in uv.lock rather than fetched by a step that can be skipped.
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-install-project
-
-# Bake the Spanish spaCy model INTO the venv site-packages (installs as the pip
-# package `es_core_news_sm`, so it travels with the venv COPY below). Without it
-# hable_ya/learner/vocabulary.py silently records no vocabulary ([]).
-RUN /app/.venv/bin/python -m spacy download es_core_news_sm
 
 ########## Runtime ##########
 FROM python:3.12-slim AS runtime

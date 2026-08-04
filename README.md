@@ -191,7 +191,8 @@ model changes; anything requiring interpretation lives in the LLM layer.
 
 ```bash
 uv sync --extra analiza
-uv run python -m spacy download es_core_news_sm   # lemmas for TTR/MTLD
+# The Spanish spaCy model (lemmas for TTR/MTLD) is a declared dependency —
+# it arrives with the sync, no `spacy download` step needed.
 # ffmpeg must be on PATH; ANTHROPIC_API_KEY for the examiner pass
 
 uv run analiza grabacion.m4a --tema "mi fin de semana"
@@ -265,7 +266,32 @@ pipeline carry over unchanged.
 ## Development
 
 ```bash
-pytest
+pytest              # unit + DB suite (DB tests skip if Postgres is down)
 ruff check .
 mypy .
+
+cd web && npm test  # pure client-side logic (vitest)
 ```
+
+### Browser checks
+
+A handful of things can only be verified in a real browser — rendered layout,
+and whether a name saved in Ajustes reaches Home without a reload. Spec #021
+shipped a defect in exactly that gap (a 40-character name wrapped the greeting
+to five lines and pushed the CTA off screen) while every unit test passed, so
+those live in `tests/e2e/` and run in CI.
+
+They are deselected from a normal `pytest` run, because they need three extra
+things:
+
+```bash
+uv sync --extra dev --extra e2e
+uv run playwright install chromium
+cd web && npm run build          # the tests serve web/dist themselves
+
+uv run pytest tests/e2e -m e2e
+```
+
+Missing any of those skips with a reason rather than failing. CI sets
+`HABLE_YA_E2E_REQUIRED=1`, which turns those skips into failures — a green
+check that silently ran nothing is worse than a red one.

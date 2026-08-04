@@ -24,10 +24,22 @@ dependencies = [
     "langdetect>=1.0.9",
     "tenacity>=9.0.0",              # retries for tool calls
     # NLP — Spanish lemmatization for runtime vocabulary tracking (#029) and
-    # recast scoring (eval). The es_core_news_sm model is a manual setup step
-    # (`python -m spacy download es_core_news_sm`); VocabularyRepo degrades
-    # gracefully if the model isn't loadable.
-    "spacy>=3.7",
+    # recast scoring (eval).
+    #
+    # The model is declared as a direct-URL wheel rather than left to a
+    # `python -m spacy download` step, because its absence is *silent*:
+    # VocabularyRepo degrades gracefully and records `[]`, which is
+    # indistinguishable from a learner who produced no vocabulary. Being
+    # outside the lockfile also meant any `uv sync` quietly pruned it — the
+    # runtime would keep serving and just stop learning words.
+    #
+    # The spacy range is bounded to the model's minor version on purpose.
+    # A model wheel declares no `Requires-Dist` on spacy; compatibility lives
+    # in its meta.json and is checked at *load* time, so an unbounded spacy
+    # would let a resolver produce an install that only fails in production.
+    # Bumping one means bumping the other.
+    "spacy>=3.8,<3.9",
+    "es-core-news-sm @ https://github.com/explosion/spacy-models/releases/download/es_core_news_sm-3.8.0/es_core_news_sm-3.8.0-py3-none-any.whl",
     "cartesia>=3.3.0",
 ]
 
@@ -51,6 +63,12 @@ dev = [
     "mypy>=1.13.0",
     "rich>=13.0.0",
     "jsonschema>=4.0.0",           # tool-schema validation in tests
+]
+e2e = [
+    # Browser checks for the rendered SPA (spec #021). Separate from `dev`
+    # because it also needs `playwright install chromium` — a few hundred MB
+    # that a developer running the unit suite should not pay for.
+    "playwright>=1.49.0",
 ]
 
 [project.scripts]
@@ -118,6 +136,19 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"
 testpaths = ["tests"]
+# Browser checks are opt-in: they need the `e2e` extra, a downloaded chromium
+# and a built `web/dist`. `pytest` stays the fast unit+DB suite; CI runs them
+# as a separate job with `-m e2e`, which overrides this.
+addopts = "-m 'not e2e'"
+markers = [
+    "e2e: browser check; needs the e2e extra, chromium and a built web/dist",
+]
+
+# Required to declare the spaCy model as a direct-URL wheel (see the `spacy`
+# comment in dependencies). Direct references are rejected by PyPI, which is
+# irrelevant here — this app is deployed as a container image, never published.
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["hable_ya", "api", "analiza"]

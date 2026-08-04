@@ -288,6 +288,35 @@ describe('greetingLine', () => {
   it('passes an accented name through untouched', () => {
     expect(greetingLine('buenas tardes', 'Ángela').name).toBe('Ángela');
   });
+
+  it('greets by first name only', () => {
+    // The hero is 96px serif in a 1.2fr column: browser verification showed a
+    // full 40-character name wrapping to five lines and pushing the CTA below
+    // the fold. The full name still lives in Ajustes and the avatar.
+    expect(greetingLine('buenas tardes', 'Ana María Ruiz').name).toBe('Ana');
+    expect(
+      greetingLine('buenas tardes', 'Maximiliana Guadalupe Fernández Ochoa Ru')
+        .name,
+    ).toBe('Maximiliana');
+  });
+
+  it('collapses irregular internal whitespace', () => {
+    expect(greetingLine('buenas tardes', 'Ana  María').name).toBe('Ana');
+    expect(greetingLine('buenas tardes', '  José  Luis  ').name).toBe('José');
+  });
+
+  it('keeps a hyphenated first name whole', () => {
+    expect(greetingLine('buenas tardes', 'José-María Ruiz').name).toBe(
+      'José-María',
+    );
+  });
+
+  it('treats a whitespace-only name as unset', () => {
+    expect(greetingLine('buenas noches', '   ')).toEqual({
+      lead: 'Buenas noches.',
+      name: null,
+    });
+  });
 });
 
 describe('avatarInitial', () => {
