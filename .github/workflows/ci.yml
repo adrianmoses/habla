@@ -110,7 +110,98 @@ jobs:
 
       # Pure-logic unit tests (spec #020): streak / duration / label
       # derivation and the API client's auth handling. No jsdom, no component
-      # rendering — the browser-dependent code stays covered by the build gate
-      # and the manual checklist.
+      # rendering — what those cannot reach is covered by the `e2e` job below.
       - name: Test
         run: npm test
+
+  # Browser checks (spec #021 follow-up). The unit suites cannot see rendered
+  # layout or client-side navigation, and #021 shipped a defect in exactly that
+  # blind spot: a 40-character name wrapped the hero to five lines and pushed
+  # the CTA below the fold while every unit test and every acceptance criterion
+  # still passed.
+  #
+  # Needs both toolchains — Python for the real learner router and Postgres,
+  # Node to build the SPA the browser loads — which is why it is its own job
+  # rather than a step in `checks` or `web`.
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: apache/age:release_PG18_1.7.0
+        env:
+          POSTGRES_USER: hable_ya
+          POSTGRES_PASSWORD: hable_ya
+          POSTGRES_DB: hable_ya
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U hable_ya"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python 3.12
+        run: uv python install 3.12
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install Python deps (dev + e2e extras)
+        run: uv sync --extra dev --extra e2e
+
+      # spaCy is imported at collection time via the learner package, same as
+      # in `checks`; the browser tests never lemmatize anything.
+      - name: Download Spanish spaCy model
+        run: uv run python -m spacy download es_core_news_sm
+
+      - name: Install chromium
+        run: uv run playwright install --with-deps chromium
+
+      # The tests serve `web/dist` themselves (tests/e2e/harness.py), so the
+      # SPA has to be built first — the same `npm run build` the release image
+      # and the `web` job run.
+      - name: Build the SPA
+        working-directory: web
+        run: npm ci && npm run build
+
+      - name: Wait for Postgres
+        run: |
+          for i in $(seq 1 30); do
+            if pg_isready -h localhost -U hable_ya; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Postgres did not become ready in 30s" >&2
+          exit 1
+
+      # HABLE_YA_E2E_REQUIRED turns the conftest's "playwright missing" /
+      # "dist missing" skips into failures. Without it a broken setup here
+      # would report a green check that ran nothing.
+      - name: Browser checks
+        env:
+          HABLE_YA_DATABASE_URL: postgresql://hable_ya:hable_ya@localhost:5432/hable_ya
+          HABLE_YA_E2E_REQUIRED: "1"
+        run: uv run pytest tests/e2e -m e2e -v
+
+      - name: Upload failure screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-screenshots
+          path: tests/e2e/screenshots/
+          if-no-files-found: ignore

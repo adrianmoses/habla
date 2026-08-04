@@ -52,6 +52,12 @@ dev = [
     "rich>=13.0.0",
     "jsonschema>=4.0.0",           # tool-schema validation in tests
 ]
+e2e = [
+    # Browser checks for the rendered SPA (spec #021). Separate from `dev`
+    # because it also needs `playwright install chromium` — a few hundred MB
+    # that a developer running the unit suite should not pay for.
+    "playwright>=1.49.0",
+]
 
 [project.scripts]
 analiza = "analiza.cli:app"
@@ -118,6 +124,13 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"
 testpaths = ["tests"]
+# Browser checks are opt-in: they need the `e2e` extra, a downloaded chromium
+# and a built `web/dist`. `pytest` stays the fast unit+DB suite; CI runs them
+# as a separate job with `-m e2e`, which overrides this.
+addopts = "-m 'not e2e'"
+markers = [
+    "e2e: browser check; needs the e2e extra, chromium and a built web/dist",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["hable_ya", "api", "analiza"]
