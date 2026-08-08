@@ -24,11 +24,12 @@ Dev-only, and cheap: no provider is involved, so unlike
 `scripts/benchmark_latency.py` this needs no API keys — just a local AGE
 instance.
 
-**DESTRUCTIVE.** To measure steady-state cost without accumulating across
-runs, this TRUNCATEs the learner tables and strips the graph before starting —
-the same statements `scripts/seed_dev_learner.py --reset` and the
-`clean_learner_state` fixture use. Point it at a scratch database, and
-re-seed afterwards with `uv run python scripts/seed_dev_learner.py --reset`.
+**DESTRUCTIVE.** To measure steady-state cost without accumulating across runs,
+this clears the learner state before starting — via `scripts/learner_reset.py`,
+literally the same code `scripts/seed_dev_learner.py --reset` and the
+`clean_learner_state` fixture use (spec #030; before that each site had its own
+copy and two of them were wrong). Point it at a scratch database, and re-seed
+afterwards with `uv run python scripts/seed_dev_learner.py --reset`.
 
 Run:  docker compose up -d db
       HABLE_YA_DATABASE_URL=postgresql://hable_ya:hable_ya@localhost:5433/hable_ya \
@@ -56,6 +57,7 @@ from hable_ya.learner import graph
 from hable_ya.learner.errors import ErrorRepo
 from hable_ya.learner.vocabulary import VocabularyRepo
 from hable_ya.runtime.latency import STATS_HEADER, LatencyStats, summarize
+from scripts.learner_reset import reset_learner_state
 
 # Representative learner turns: enough vocabulary to be typical (the spec's
 # worked example is ~8 lemmas), one with two error categories, one clean.
@@ -78,16 +80,13 @@ SESSION_ID = "benchmark-graph-writes"
 
 
 async def _reset(conn: asyncpg.Connection) -> None:
-    """Truncate learner tables and strip the graph — same statements the
-    `clean_learner_state` fixture uses, so a run does not accumulate."""
-    await conn.execute(
-        "TRUNCATE error_observations, error_counts, vocabulary_items, "
-        "turns, sessions, band_history RESTART IDENTITY CASCADE"
-    )
-    await conn.execute(
-        f"SELECT * FROM cypher('{graph.GRAPH}', $$ "
-        f"MATCH (n) DETACH DELETE n $$) AS (v ag_catalog.agtype)"
-    )
+    """Clear the learner state, then open the session this benchmark writes to.
+
+    The clearing is `reset_learner_state` (spec #030) so a run does not
+    accumulate and cannot drift from what the fixture does; the session insert
+    is this script's own.
+    """
+    await reset_learner_state(conn)
     await conn.execute(
         """
         INSERT INTO sessions (session_id, started_at, theme_domain, band_at_start)

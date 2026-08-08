@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | id | 030 |
-| status | draft |
+| status | approved |
 | created | 2026-08-08 |
 
 ---
@@ -160,18 +160,19 @@ change that would re-break the reset.
 
 ### Open Questions
 
+Both resolved at approval, as proposed:
+
 1. **Where does the shared reset live?** It is a destructive helper used by
    tests and dev scripts and by nothing in production. Candidates: `hable_ya/`
    (importable everywhere, which is the problem), or `scripts/` (dev-only by
    construction, and `tests/` already imports from `scripts.fixtures.*`, so the
-   precedent exists). *Proposed: `scripts/`* — see Key Decision 1. Resolve
-   before approval.
+   precedent exists). **Resolved: `scripts/`** — see Key Decision 1.
 
 2. **Does the profile reset enumerate columns or derive them?** Deriving from
    `information_schema` is drift-proof but cannot know the intended base value
    (`band` has no column default; the migration inserts `'A2'` explicitly).
-   *Proposed: enumerate the base state, and assert the enumeration covers the
-   table* — the coverage assertion is what makes enumeration safe. See Key
+   **Resolved: enumerate the base state, and assert the enumeration covers the
+   table** — the coverage assertion is what makes enumeration safe. See Key
    Decision 2.
 
 ---

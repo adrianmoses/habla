@@ -117,28 +117,15 @@ async def clean_learner_state(db_pool: asyncpg.Pool) -> asyncpg.Pool:
     the repo across multiple `async with pool.acquire()` blocks and observe
     their own effects. Truncating up front + resetting the seed row is how
     the rollback-free path stays isolated across tests.
+
+    The statements live in `scripts/learner_reset.py` (spec #030) so this
+    fixture and the dev scripts cannot drift apart again — they did, twice: the
+    graph clear (#022) and the profile reset. `display_name` is part of that
+    shared base state (spec #021), because the PATCH tests commit a name and
+    without clearing it the name leaks into every test that runs after them.
     """
-    from hable_ya.learner import graph as learner_graph
+    from scripts.learner_reset import reset_learner_state
 
     async with db_pool.acquire() as conn:
-        await conn.execute(
-            "TRUNCATE error_observations, error_counts, vocabulary_items, "
-            "turns, sessions, band_history RESTART IDENTITY CASCADE"
-        )
-        # `display_name` is reset too (spec #021): the PATCH tests commit a
-        # name, and without this it would leak into every test that runs after
-        # them.
-        await conn.execute(
-            "UPDATE learner_profile "
-            "SET sessions_completed = 0, "
-            "    band = 'A2', "
-            "    stable_sessions_at_band = 0, "
-            "    last_band_change_at = NULL, "
-            "    display_name = NULL "
-            "WHERE id = 1"
-        )
-        await conn.execute(
-            f"SELECT * FROM cypher('{learner_graph.GRAPH}', $$ "
-            f"MATCH (n) DETACH DELETE n $$) AS (v ag_catalog.agtype)"
-        )
+        await reset_learner_state(conn)
     return db_pool

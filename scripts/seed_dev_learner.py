@@ -15,23 +15,46 @@ runs in production: there is no caller outside a developer's shell.
     HABLE_YA_DATABASE_URL=postgresql://hable_ya:hable_ya@localhost:5433/hable_ya \
         uv run python scripts/seed_dev_learner.py --reset
 
-`--reset` truncates the learner tables first (same statement the
-`clean_learner_state` test fixture uses) so reseeding is repeatable.
+`--reset` clears the learner state first — tables, AGE graph and profile row —
+through `scripts/learner_reset.py`, the one definition shared with the
+`clean_learner_state` test fixture (spec #030). Reseeding is therefore
+repeatable; seeding *without* `--reset` is not, since the turn and band-history
+inserts have no conflict handling.
 
-Deliberate properties the frontend needs to exercise:
+Contract — the properties the frontend needs, asserted by
+`tests/test_seed_dev_learner.py`:
 
-- A **3-day streak** ending today (today / yesterday / two days ago), then a gap
-  — so a streak calculation that ignores gaps is visibly wrong.
+- A **3-day streak** ending on the anchor date (see below), then a gap — so a
+  streak calculation that ignores gaps is visibly wrong.
 - One session with **`ended_at IS NULL`** (the in-progress / crashed case).
 - Sessions with **`mode IS NULL`** (pre-#023 rows) alongside all four modes.
 - Error categories that are **not** in `eval.agent.personas.ALLOWED_ERROR_PATTERNS`
   — `errors[].type` is a free-form string in the `log_turn` schema with no enum
   (`hable_ya/tools/schema.py`), so the UI must survive whatever Claude writes.
-- More than 20 turns, since `l1_reliance` / `speech_fluency` are computed over a
-  trailing 20-turn window (`hable_ya/learner/profile.py`).
+- More than `profile_window_turns` turns, since `l1_reliance` / `speech_fluency`
+  are computed over that trailing window (`hable_ya/learner/profile.py`).
 - An **accented `display_name`** (`Ángela`, spec #021), so the seeded DB shows
   the populated greeting rather than only the empty state, and the avatar
   initial is exercised on a non-ASCII first code point.
+- The AGE graph **mirrors** the relational aggregates — one `VocabItem` per
+  `vocabulary_items` row, one `ErrorPattern` per `error_counts` row (#022).
+
+**Anchored to seed time, and it decays.** Every date is relative to the `now`
+passed to `seed()` — the *shape* (three consecutive days, then a gap) survives
+indefinitely, but "ending today" is only true on the day you seed. A database
+seeded last week shows no session today, so a UI that renders an active streak
+only when it reaches today will show nothing, correctly. The anchor date is
+logged for exactly this reason: reseed before concluding a screen is broken.
+
+Incidental — true today, deliberately *not* contract, so do not assert it:
+
+- **Cross-table counts do not reconcile.** `error_counts` holds counts up to 14
+  against 5 `error_observations` rows, and the graph's counters differ from the
+  relational ones because the writers increment per call (#022: "presence and
+  shape, not magnitude"). This is a fabricated end state, not a replayed
+  history — the docstring above says why that is the point.
+- The specific themes, utterances, lemmas and session count. Reshape them
+  freely; the tests assert properties, not this data.
 """
 
 from __future__ import annotations
@@ -46,13 +69,9 @@ import asyncpg
 
 from hable_ya.db import close_pool, open_pool
 from hable_ya.learner import graph as learner_graph
+from scripts.learner_reset import reset_learner_state
 
 logger = logging.getLogger("seed_dev_learner")
-
-TRUNCATE_SQL = (
-    "TRUNCATE error_observations, error_counts, vocabulary_items, "
-    "turns, sessions, band_history RESTART IDENTITY CASCADE"
-)
 
 # (days_ago, theme_domain, band_at_start, mode, n_turns, ended)
 # Days 0/1/2 are consecutive → a 3-day streak; day 3 is absent → it breaks.
@@ -280,6 +299,24 @@ async def _seed_bands(conn: asyncpg.Connection, now: datetime) -> None:
     )
 
 
+async def seed(conn: asyncpg.Connection, *, now: datetime) -> None:
+    """Write the whole seeded end state, in one transaction.
+
+    Takes the connection and the anchor `now` from the caller so a test can pin
+    time and assert the recency-relative properties (spec #030). `amain` owns
+    the pool; this owns the data.
+
+    Not idempotent on its own — the `turns` and `band_history` inserts have no
+    conflict handling. Call `reset_learner_state` first, which is what `--reset`
+    does.
+    """
+    async with conn.transaction():
+        await _seed_sessions(conn, now)
+        await _seed_aggregates(conn, now)
+        await _seed_bands(conn, now)
+        await _seed_graph(conn, now)
+
+
 async def amain(reset: bool) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
     now = datetime.now(UTC)
@@ -287,25 +324,21 @@ async def amain(reset: bool) -> int:
     try:
         async with pool.acquire() as conn:
             if reset:
-                logger.info("Truncating learner tables")
-                await conn.execute(TRUNCATE_SQL)
-                # The graph too (spec #022) — TRUNCATE does not touch AGE, so
-                # without this a reseed leaves stale nodes behind and
-                # /dev/learner's graph block contradicts the relational data
-                # right beside it.
-                logger.info("Clearing the AGE graph")
-                await conn.execute(
-                    f"SELECT * FROM cypher('{learner_graph.GRAPH}', $$ "
-                    f"MATCH (n) DETACH DELETE n $$) AS (v ag_catalog.agtype)"
-                )
-            async with conn.transaction():
-                await _seed_sessions(conn, now)
-                await _seed_aggregates(conn, now)
-                await _seed_bands(conn, now)
-                await _seed_graph(conn, now)
+                logger.info("Clearing learner state (tables, AGE graph, profile row)")
+                await reset_learner_state(conn)
+            await seed(conn, now=now)
             turns = await conn.fetchval("SELECT count(*) FROM turns")
             sessions = await conn.fetchval("SELECT count(*) FROM sessions")
-        logger.info("Seeded %s sessions / %s turns", sessions, turns)
+        # The anchor date, not just the counts: every seeded date is relative to
+        # it, so "the streak ends today" stops being true the day after. A
+        # developer eyeballing an empty streak needs to be able to tell stale
+        # data from a broken screen.
+        logger.info(
+            "Seeded %s sessions / %s turns, anchored at %s (streak ends on that date)",
+            sessions,
+            turns,
+            now.date().isoformat(),
+        )
     finally:
         await close_pool(pool)
     return 0
