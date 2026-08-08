@@ -59,7 +59,9 @@ def test_ingest_updates_rolling_means() -> None:
 
     snapshot = acc.snapshot()
     assert snapshot.l1_reliance == pytest.approx(2 / 5)
-    assert snapshot.speech_fluency == pytest.approx((0.3 + 0.3 + 0.6 + 0.9 + 0.9) / 5)
+    assert snapshot.speech_fluency == pytest.approx(
+        (0.3 + 0.3 + 0.6 + 0.9 + 0.9) / 5
+    )
     assert acc.turns_ingested == 5
 
 
@@ -159,7 +161,9 @@ async def test_accumulator_matches_repo_for_same_log_turn_sequence(
     asserts the two snapshots are field-for-field identical.
     """
     persona = _persona()
-    acc = ProfileAccumulator(persona, window_turns=20, top_errors=3, top_vocab=3)
+    acc = ProfileAccumulator(
+        persona, window_turns=20, top_errors=3, top_vocab=3
+    )
     base = datetime(2026, 4, 22, 12, 0, 0, tzinfo=UTC)
     timeline: list[tuple[datetime, FluencySignal, bool, list[str], list[str]]] = [
         (base.replace(minute=0), "weak", True, ["ser_estar"], ["café", "querer"]),

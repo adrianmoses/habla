@@ -61,7 +61,9 @@ async def test_migration_applied_band_columns_present(
         )
         assert col == "stable_sessions_at_band"
         # band_history table exists.
-        rel = await conn.fetchval("SELECT to_regclass('public.band_history')")
+        rel = await conn.fetchval(
+            "SELECT to_regclass('public.band_history')"
+        )
         assert rel == "band_history"
 
 
@@ -141,7 +143,9 @@ async def test_placement_abstains_when_too_few_valid_bands(
     # Calibration stays False; subsequent session re-enters the diagnostic.
     assert (await is_calibrated_async(clean_learner_state)) is False
     async with clean_learner_state.acquire() as conn:
-        history_count = await conn.fetchval("SELECT count(*) FROM band_history")
+        history_count = await conn.fetchval(
+            "SELECT count(*) FROM band_history"
+        )
     assert history_count == 0
 
 
@@ -152,10 +156,12 @@ async def test_apply_band_change_resets_stable_sessions(
     # Seed stable_sessions_at_band > 0 so we observe the reset on flip.
     async with clean_learner_state.acquire() as conn:
         await conn.execute(
-            "UPDATE learner_profile SET stable_sessions_at_band = 5 WHERE id = 1"
+            "UPDATE learner_profile SET stable_sessions_at_band = 5 "
+            "WHERE id = 1"
         )
         await conn.execute(
-            "INSERT INTO sessions (session_id, band_at_start) VALUES ('flip_s1', 'A2')"
+            "INSERT INTO sessions (session_id, band_at_start) "
+            "VALUES ('flip_s1', 'A2')"
         )
         for i in range(4):
             await conn.execute(

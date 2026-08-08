@@ -17,23 +17,12 @@ from analiza.examiner import (
 FECHA = dt.date(2026, 7, 19)
 
 METRICS: dict[str, float | int] = {
-    "duration_s": 120.0,
-    "speech_time_s": 100.0,
-    "wpm_gross": 90.0,
-    "wpm_articulation": 108.0,
-    "pauses_n": 5,
-    "pauses_total_s": 12.0,
-    "pause_max_s": 3.2,
-    "pauses_midclause_n": 2,
-    "fillers_n": 4,
-    "fillers_per_min": 2.0,
-    "connectors_unique_n": 3,
-    "connectors_formal_ratio": 0.33,
-    "ttr": 0.6,
-    "mtld": 42.0,
-    "repeats_n": 1,
-    "low_conf_spans_n": 0,
-    "vad_transcript_gap_s": 1.1,
+    "duration_s": 120.0, "speech_time_s": 100.0, "wpm_gross": 90.0,
+    "wpm_articulation": 108.0, "pauses_n": 5, "pauses_total_s": 12.0,
+    "pause_max_s": 3.2, "pauses_midclause_n": 2, "fillers_n": 4,
+    "fillers_per_min": 2.0, "connectors_unique_n": 3,
+    "connectors_formal_ratio": 0.33, "ttr": 0.6, "mtld": 42.0,
+    "repeats_n": 1, "low_conf_spans_n": 0, "vad_transcript_gap_s": 1.1,
 }
 
 
@@ -47,9 +36,8 @@ def examiner_result() -> ExaminerResult:
             ErrorRow(dije="fui en casa", deberia_ser="fui a casa", por_que="régimen")
         ],
         subjuntivo=[
-            SubjuntivoCheck(
-                conector="a menos que", frase="a menos que vengas", correcto=True
-            )
+            SubjuntivoCheck(conector="a menos que", frase="a menos que vengas",
+                            correcto=True)
         ],
         mejoras=[
             Mejora(
@@ -63,13 +51,8 @@ def examiner_result() -> ExaminerResult:
 
 def test_render_note_with_examiner() -> None:
     md = note.render_note(
-        fecha=FECHA,
-        ejercicio="monologo",
-        tema="viajes",
-        duration_s=120.0,
-        metrics=METRICS,
-        examiner=examiner_result(),
-        prompt_version="examiner_v1",
+        fecha=FECHA, ejercicio="monologo", tema="viajes", duration_s=120.0,
+        metrics=METRICS, examiner=examiner_result(), prompt_version="examiner_v1",
     )
     assert md.startswith("---\ntype: sesion\n")
     assert "fecha: 2026-07-19" in md
@@ -85,13 +68,8 @@ def test_render_note_with_examiner() -> None:
 
 def test_render_note_without_examiner_marks_pending() -> None:
     md = note.render_note(
-        fecha=FECHA,
-        ejercicio="monologo",
-        tema=None,
-        duration_s=60.0,
-        metrics=METRICS,
-        examiner=None,
-        prompt_version="examiner_v1",
+        fecha=FECHA, ejercicio="monologo", tema=None, duration_s=60.0,
+        metrics=METRICS, examiner=None, prompt_version="examiner_v1",
     )
     assert "Pendiente" in md
     assert "## Chunks capturados" not in md
@@ -111,21 +89,11 @@ def test_note_path_collision(tmp_path: Path) -> None:
 
 def _row() -> dict[str, object]:
     return {
-        "date": "2026-07-19",
-        "ejercicio": "monologo",
-        "tema": "viajes",
-        "duration_s": 120.0,
-        "wpm_gross": 90.0,
-        "wpm_articulation": 108.0,
-        "pauses_n": 5,
-        "pause_max_s": 3.2,
-        "fillers_per_min": 2.0,
-        "connectors_unique": 3,
-        "formal_ratio": 0.33,
-        "mtld": 42.0,
-        "errors_n": 1,
-        "score_total": 8,
-        "prompt_version": "examiner_v1",
+        "date": "2026-07-19", "ejercicio": "monologo", "tema": "viajes",
+        "duration_s": 120.0, "wpm_gross": 90.0, "wpm_articulation": 108.0,
+        "pauses_n": 5, "pause_max_s": 3.2, "fillers_per_min": 2.0,
+        "connectors_unique": 3, "formal_ratio": 0.33, "mtld": 42.0,
+        "errors_n": 1, "score_total": 8, "prompt_version": "examiner_v1",
     }
 
 

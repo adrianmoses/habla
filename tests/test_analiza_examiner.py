@@ -42,12 +42,8 @@ def test_build_prompt_fills_all_placeholders() -> None:
 
 def test_build_prompt_empty_optionals() -> None:
     prompt = examiner.build_prompt(
-        transcript="hola",
-        metrics={},
-        tema=None,
-        ejercicio="monologo",
-        low_conf_hints=[],
-        subjunctive_connectors=[],
+        transcript="hola", metrics={}, tema=None, ejercicio="monologo",
+        low_conf_hints=[], subjunctive_connectors=[],
     )
     assert "(sin tema)" in prompt
     assert "(ninguno)" in prompt

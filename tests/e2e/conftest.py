@@ -113,9 +113,9 @@ async def page(
         errors: list[str] = []
         pg.on(
             "console",
-            lambda m: (
-                errors.append(f"{m.type}: {m.text}") if m.type == "error" else None
-            ),
+            lambda m: errors.append(f"{m.type}: {m.text}")
+            if m.type == "error"
+            else None,
         )
         pg.on("pageerror", lambda e: errors.append(f"pageerror: {e}"))
         pg.console_errors = errors  # type: ignore[attr-defined]

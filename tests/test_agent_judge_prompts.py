@@ -143,7 +143,9 @@ def test_cache_key_changes_with_transcript_perturbation() -> None:
     persona = _persona()
     base = _transcript()
     perturbed = [*base[:-1], ConversationTurn(role="assistant", content="distinto")]
-    assert _judge_cache_key(persona.id, base) != _judge_cache_key(persona.id, perturbed)
+    assert _judge_cache_key(persona.id, base) != _judge_cache_key(
+        persona.id, perturbed
+    )
 
 
 def test_cache_key_stable_for_same_inputs() -> None:

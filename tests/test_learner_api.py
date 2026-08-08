@@ -23,7 +23,9 @@ from hable_ya.auth import authorize_token
 from hable_ya.learner.leveling import LevelingService
 
 
-def _app(pool: object, *, token: str = "", disabled: bool = False) -> FastAPI:
+def _app(
+    pool: object, *, token: str = "", disabled: bool = False
+) -> FastAPI:
     app = FastAPI()
     app.state.db_pool = pool
     app.state.settings = SimpleNamespace(
@@ -33,7 +35,9 @@ def _app(pool: object, *, token: str = "", disabled: bool = False) -> FastAPI:
     return app
 
 
-async def _get(app: FastAPI, path: str, *, bearer: str | None = None) -> httpx.Response:
+async def _get(
+    app: FastAPI, path: str, *, bearer: str | None = None
+) -> httpx.Response:
     headers = {"Authorization": f"Bearer {bearer}"} if bearer is not None else {}
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
