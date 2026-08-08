@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | id | 031 |
-| status | draft |
+| status | approved |
 | created | 2026-08-08 |
 
 ---
@@ -130,8 +130,9 @@ prove the restructure preserved behaviour.
   explicitly rejected; see Why.
 - **Not moving AGE DDL out of alembic.** The transactional mismatch between
   alembic's per-migration transaction and AGE's non-rollback-able DDL is a real
-  architectural question — and its own roadmap item, not a change to smuggle in
-  behind a test.
+  architectural question — and it is now **#032**, sequenced after this one
+  precisely so the harness built here can demonstrate that restructure preserves
+  behaviour. Not a change to smuggle in behind a test.
 - **Not asserting data survives a round-trip.** `downgrade base` drops every
   learner table; nothing preserves rows across it and nothing should pretend to.
   These tests assert *schema* reversibility only. Data safety is what
