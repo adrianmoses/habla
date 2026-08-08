@@ -28,6 +28,8 @@ from eval.fixtures.schema import (
     Theme,
 )
 from hable_ya.config import settings
+from hable_ya.handoff.models import SpeakingHandoff
+from hable_ya.handoff.prompt import handoff_theme, render_handoff_block
 from hable_ya.learner.modes import build_mode_theme
 from hable_ya.learner.profile import (
     LearnerProfileRepo,
@@ -38,7 +40,10 @@ from hable_ya.learner.profile import (
 from hable_ya.learner.themes import NEUTRAL_THEME as _NEUTRAL_THEME
 from hable_ya.learner.themes import get_session_theme
 from hable_ya.pipeline.conversation import ConversationConfig
-from hable_ya.pipeline.prompts.register import COLD_START_INSTRUCTIONS
+from hable_ya.pipeline.prompts.register import (
+    BAND_ESTIMATE_INSTRUCTION,
+    COLD_START_INSTRUCTIONS,
+)
 from hable_ya.pipeline.prompts.render import render_system_prompt
 
 
@@ -76,6 +81,7 @@ async def build_session_prompt(
     pool: asyncpg.Pool | None = None,
     recent_domains: list[str] | None = None,
     conversation_config: ConversationConfig | None = None,
+    handoff: SpeakingHandoff | None = None,
 ) -> SessionPrompt:
     opt_in_cold_start = bool(learner.get("cold_start"))
     # Spec 023: the requested mode is only honoured for a calibrated learner;
@@ -87,7 +93,7 @@ async def build_session_prompt(
         band_raw = learner.get("band", "A2")
         band: CEFRBand = band_raw if isinstance(band_raw, str) else "A2"  # type: ignore[assignment]
         profile = _neutral_profile(band)
-        theme = _NEUTRAL_THEME
+        theme = _NEUTRAL_THEME if handoff is None else handoff_theme(handoff)
     else:
         snapshot = await LearnerProfileRepo(pool).get(
             window_turns=settings.profile_window_turns,
@@ -102,7 +108,13 @@ async def build_session_prompt(
         calibrated = await is_calibrated_async(pool)
         profile = snapshot_to_profile(snapshot, is_calibrated=calibrated)
         opt_in_cold_start = opt_in_cold_start or not calibrated
-        if not calibrated:
+        if handoff is not None:
+            # Spec #033: a handoff outranks both the cooldown-aware random pick
+            # and the cold-start neutral theme. The learner followed a deep link
+            # to practise one specific consigna; giving them a different topic
+            # (or the placement ladder) would break the contract the link made.
+            theme = handoff_theme(handoff)
+        elif not calibrated:
             theme = _NEUTRAL_THEME
         else:
             cfg = conversation_config or ConversationConfig()
@@ -126,7 +138,16 @@ async def build_session_prompt(
     params = SystemParams(profile=profile, theme=theme)
     rendered = render_system_prompt(params, band=band, tool_mode="native")
     if opt_in_cold_start:
-        rendered = f"{rendered}\n\n## Primera sesión\n{COLD_START_INSTRUCTIONS}"
+        # A handoff replaces the diagnostic *ladder* (it would pull the session
+        # away from the consigna) but not the per-turn band estimate placement
+        # reads — otherwise a first-ever session arriving by deep link would
+        # leave the learner unplaceable.
+        instructions = (
+            COLD_START_INSTRUCTIONS if handoff is None else BAND_ESTIMATE_INSTRUCTION
+        )
+        rendered = f"{rendered}\n\n## Primera sesión\n{instructions}"
+    if handoff is not None:
+        rendered = f"{rendered}\n\n{render_handoff_block(handoff)}"
     return SessionPrompt(text=rendered, theme=theme, band=band, mode=mode)
 
 
@@ -144,11 +165,13 @@ async def build_system_prompt(
     pool: asyncpg.Pool | None = None,
     recent_domains: list[str] | None = None,
     conversation_config: ConversationConfig | None = None,
+    handoff: SpeakingHandoff | None = None,
 ) -> str:
     session_prompt = await build_session_prompt(
         learner,
         pool=pool,
         recent_domains=recent_domains,
         conversation_config=conversation_config,
+        handoff=handoff,
     )
     return session_prompt.text

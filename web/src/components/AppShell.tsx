@@ -7,9 +7,9 @@
 import type { CSSProperties, ReactNode } from 'react';
 import { avatarInitial } from '../lib/format';
 import { useLearnerProfile } from '../lib/learner';
-import { navigate, type Route } from '../lib/router';
+import { navigate, type NavRoute, type Route } from '../lib/router';
 
-const NAV: readonly { route: Route; label: string }[] = [
+const NAV: readonly { route: NavRoute; label: string }[] = [
   { route: 'progreso', label: 'Progreso' },
   { route: 'historial', label: 'Historial' },
   { route: 'ajustes', label: 'Ajustes' },

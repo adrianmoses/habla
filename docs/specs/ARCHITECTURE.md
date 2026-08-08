@@ -50,10 +50,11 @@ that `tests/test_doc_paths.py` can check every row independently.
 | Path | Responsibility |
 |---|---|
 | `api/main.py` | App factory, lifespan (pool, migrations), router mount |
-| `api/routes/` | Health, session WebSocket, `/api/learner*`, dev-gated endpoints |
+| `api/routes/` | Health, session WebSocket, `/api/learner*`, `/api/sessions*`, dev-gated endpoints |
 | `hable_ya/config.py` | pydantic-settings — every tunable and credential |
 | `hable_ya/auth.py` | Shared-secret session / API token check |
 | `hable_ya/db/` | asyncpg pool + AGE bootstrap; alembic env and versions |
+| `hable_ya/handoff/` | La Libreta handoffs — row model, prompt quarantine, callback delivery |
 | `hable_ya/learner/` | The learner model — ingest, repos, aggregation, reads |
 | `hable_ya/learner/leveling/` | Band promote/demote policy and its DB writes |
 | `hable_ya/pipeline/` | Pipecat composition and the STT/LLM/TTS services |
@@ -61,7 +62,7 @@ that `tests/test_doc_paths.py` can check every row independently.
 | `hable_ya/pipeline/processors/` | In-pipeline observers (turns, emission, latency) |
 | `hable_ya/runtime/` | Per-session in-memory state (observation ring, latency) |
 | `hable_ya/tools/schema.py` | `HABLE_YA_TOOLS` — the `log_turn` tool schema |
-| `web/src/routes/` | SPA screens: Home, Session, Progreso, Historial, Ajustes |
+| `web/src/routes/` | SPA screens: Home, Handoff, Session, Progreso, Historial, Ajustes |
 | `web/src/voice/` | WebSocket client, PCM capture, amplitude |
 | `web/src/lib/` | API client, session-token handling, formatting, `history.pushState` router |
 | `eval/scoring/` | Per-turn dimension scoring (recast, register, language) |

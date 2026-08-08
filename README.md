@@ -53,6 +53,19 @@ Put it in `.env` as `HABLE_YA_SESSION_AUTH_TOKEN=…`, and pass it from the clie
 the wire in cleartext until a TLS/`wss://` reverse proxy is in front, so don't
 expose the raw `ws://` port publicly without one.
 
+The La Libreta handoff (spec #033) has its **own** secret, `LA_LIBRETA_API_TOKEN`,
+which authorizes `POST /api/sessions` and the outbound completion callback. It is
+not interchangeable with the session token: holding it lets La Libreta create a
+speaking handoff and nothing else — not a microphone, not a provider socket, not
+a learner's progress. Running the integration also needs
+`HABLE_YA_PUBLIC_BASE_URL` (the canonical origin the returned deep link is built
+from) and, for callbacks, `HABLE_YA_LA_LIBRETA_CALLBACK_ORIGINS` — a
+comma-separated HTTPS origin allowlist that is **empty by default**, so no
+callback destination is permitted until you name one. Startup refuses to boot if
+the token or the base URL is missing; set
+`HABLE_YA_LA_LIBRETA_INTEGRATION_DISABLED=true` to run without the integration
+(the base `docker-compose.yml` does exactly that).
+
 ```bash
 uv sync
 cp .env.example .env   # then fill in the three keys + CARTESIA_VOICE_ID + the auth token

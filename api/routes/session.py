@@ -35,6 +35,8 @@ from pipecat.transports.websocket.fastapi import (
 
 from hable_ya.auth import authorize_token
 from hable_ya.config import Settings
+from hable_ya.handoff import repo as handoff_repo
+from hable_ya.handoff.models import SpeakingHandoff
 from hable_ya.pipeline.conversation import (
     ConversationConfig,
     parse_conversation_config,
@@ -88,6 +90,32 @@ def _extract_conversation_config(websocket: WebSocket) -> ConversationConfig:
         websocket.query_params.get("mode"),
         websocket.query_params.get("topic"),
     )
+
+
+async def _resolve_handoff(pool: object, raw_id: str | None) -> SpeakingHandoff | None:
+    """Look up the La Libreta handoff this session was started from (spec #033).
+
+    The browser sends only an opaque id (`?handoff=`), never the prompt text:
+    the authoritative consigna, structures and target are read here, server
+    side, after the end-user auth gate above has already run. So a learner
+    cannot rewrite what a handoff says by editing a URL, and the id is useless
+    without the session token.
+
+    Fail-safe like the #023 config parser: an unknown or malformed id degrades
+    to an ordinary session rather than breaking the handshake — the pre-session
+    view is where a bad id is supposed to be reported.
+    """
+    if not raw_id or pool is None:
+        return None
+    try:
+        async with pool.acquire() as conn:  # type: ignore[attr-defined]
+            handoff = await handoff_repo.get(conn, raw_id)
+    except Exception:
+        logger.exception("session: handoff lookup failed — continuing without it")
+        return None
+    if handoff is None:
+        logger.warning("session: unknown handoff id requested")
+    return handoff
 
 
 def _authorized(settings: Settings, presented: str | None) -> bool:
@@ -186,15 +214,18 @@ async def session_ws(websocket: WebSocket) -> None:
 
     learner = default_learner(settings)
     conversation_config = _extract_conversation_config(websocket)
+    handoff = await _resolve_handoff(pool, websocket.query_params.get("handoff"))
     # Resolve recent_domains from `sessions` (empty on first run); build the
     # system prompt against the live profile + cooldown-aware theme choice,
-    # steered by the requested conversation mode (honoured once calibrated).
+    # steered by the requested conversation mode (honoured once calibrated) or
+    # by a La Libreta handoff, which outranks both (spec #033).
     recent_domains = await _query_recent_theme_domains(pool) if pool is not None else []
     session_prompt = await build_session_prompt(
         learner,
         pool=pool,
         recent_domains=recent_domains,
         conversation_config=conversation_config,
+        handoff=handoff,
     )
     # Register `log_turn` with the model (native tool-calling) on THIS session's
     # own LLM service, so a concurrent connection cannot overwrite the handler.
@@ -258,6 +289,20 @@ async def session_ws(websocket: WebSocket) -> None:
             logger.exception(
                 "session %s: start_session failed — continuing without DB state",
                 session_id,
+            )
+
+    if handoff is not None and pool is not None:
+        # First start only (spec #033): a learner may open the deep link, leave,
+        # and come back, and `started_at` answers "when did practice first
+        # begin". Best-effort — losing the stamp must not cost the session.
+        try:
+            async with pool.acquire() as conn:
+                await handoff_repo.mark_started(conn, handoff.id)
+        except Exception:
+            logger.exception(
+                "session %s: marking handoff %s started failed",
+                session_id,
+                handoff.id,
             )
 
     try:

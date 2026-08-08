@@ -5,6 +5,7 @@ import { CloseIcon, MicIcon, PauseIcon, PlayIcon } from '../components/icons';
 import { VoiceClient } from '../voice/client';
 import { useAmplitude } from '../voice/amplitude';
 import { clearSessionToken, getSessionToken } from '../lib/token';
+import { useCompleteHandoff } from '../lib/handoff';
 import { useLearnerProfile } from '../lib/learner';
 import { formatMode } from '../lib/format';
 import { pushSessionEntry, useBackHandler } from '../lib/router';
@@ -40,6 +41,13 @@ export default function Session({ request, onExit }: Props) {
   const profile = useLearnerProfile();
   const band = profile.data?.band ?? 'A2';
   const modeLabel = formatMode(request.mode);
+
+  // Spec #033, Open Question 1. A handoff-backed session gets a second exit
+  // that means something different: "Terminar" reports the practice to La
+  // Libreta, "Cerrar" just leaves. Keeping them apart is the whole point —
+  // teardown, an error, an idle timeout and a preemption all close a session,
+  // and none of them is evidence the learner did the task.
+  const completion = useCompleteHandoff(request.handoff);
 
   // A session is not a route (spec OQ2), but Back should still leave it — this
   // gives `popstate` an entry to pop, and the handler exits cleanly.
@@ -107,6 +115,13 @@ export default function Session({ request, onExit }: Props) {
   const handleClose = () => {
     client?.disconnect('user close').catch(() => undefined);
     onExit('user');
+  };
+
+  // Completion is committed server-side before the socket goes down, but the
+  // learner never waits on it: the request is fired and the session ends
+  // regardless of whether La Libreta is reachable.
+  const handleFinish = () => {
+    void completion.complete().finally(handleClose);
   };
 
   return (
@@ -218,6 +233,27 @@ export default function Session({ request, onExit }: Props) {
               {band}
             </span>
           </div>
+          {request.handoff && (
+            <button
+              type="button"
+              onClick={handleFinish}
+              disabled={completion.state === 'sending'}
+              style={{
+                padding: '8px 16px',
+                borderRadius: 100,
+                border: '1px solid rgba(168, 84, 58, 0.3)',
+                background: 'rgba(200, 116, 84, 0.12)',
+                color: 'var(--clay-deep)',
+                fontFamily: 'var(--sans)',
+                fontSize: 13,
+                cursor: completion.state === 'sending' ? 'wait' : 'pointer',
+              }}
+            >
+              {completion.state === 'sending'
+                ? 'Terminando…'
+                : 'Terminar práctica'}
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setPaused((p) => !p)}

@@ -14,6 +14,12 @@ services:
       # Local dev uses the placeholder DB password → opt out of the #017
       # secure-credential fail-fast. The prod overlay sets this false.
       HABLE_YA_ALLOW_DEFAULT_DB_CREDENTIALS: "true"
+      # The La Libreta handoff (#033) needs an integration secret and a
+      # canonical public origin, neither of which a laptop has. Opt out
+      # explicitly — an unset token is not the opt-out, so this is the switch
+      # that keeps `docker compose up` booting. The prod overlay turns it back
+      # on. Set it false locally (plus the two values) to exercise the handoff.
+      HABLE_YA_LA_LIBRETA_INTEGRATION_DISABLED: "true"
     volumes:
       # Named volume (not a host bind): the app now runs as non-root (uid 10001)
       # and a fresh named volume inherits the image's app-owned /app/data, so the

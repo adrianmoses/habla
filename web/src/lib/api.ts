@@ -47,6 +47,32 @@ export async function apiGet<T>(path: string, signal?: AbortSignal): Promise<T> 
 }
 
 /**
+ * POST with no body — the one action verb on this API (spec #033).
+ *
+ * Same auth header and 401 recovery as the rest. Nothing is sent: the only
+ * POST the browser makes is "this handoff is complete", and the id in the path
+ * is the entire request. Deliberately so — the server owns every field of the
+ * handoff, and giving the browser a body here would give it something to
+ * tamper with.
+ */
+export async function apiPost<T>(path: string, signal?: AbortSignal): Promise<T> {
+  const token = getSessionToken();
+  const res = await fetch(path, {
+    method: 'POST',
+    signal,
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+  });
+
+  if (res.status === 401) {
+    clearSessionToken();
+    throw new UnauthorizedError();
+  }
+  if (!res.ok) throw new ApiError(res.status);
+
+  return (await res.json()) as T;
+}
+
+/**
  * PATCH with a JSON body — the write half of the API (spec #021).
  *
  * Same auth header and the same 401 recovery as `apiGet`, deliberately: a

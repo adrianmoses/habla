@@ -91,6 +91,43 @@ class Settings(BaseSettings):
     # reaping half-open connections without needing a new one to evict them.
     session_idle_timeout_secs: float = 300.0
 
+    # La Libreta server-to-server session handoff (spec #033).
+    #
+    # Three server-only values, none of which ever reaches the browser:
+    #   la_libreta_api_token   — the *integration* bearer secret. Separate from
+    #     session_auth_token on purpose: La Libreta may create a handoff but
+    #     must not be able to open a microphone or a paid provider socket
+    #     (#016's trust boundary). Also sent on the outbound callback.
+    #   public_base_url        — the canonical externally reachable origin the
+    #     response `url` is built from. Never inferred from `Host` or a
+    #     forwarded header, which an untrusted caller controls.
+    #   la_libreta_callback_origins — comma-separated HTTPS origin allowlist
+    #     for `callbackUrl`. Empty (the default) means *no* callback
+    #     destination is permitted: the payload supplies a URL the server then
+    #     fetches, so an unconstrained default would be an SSRF primitive.
+    #
+    # Presence is checked at startup (`require_integration_config`), not here,
+    # so keyless CI `Settings()` construction still works. Fail-closed like
+    # #016: an unset token doesn't open the endpoint, it closes it.
+    la_libreta_api_token: str = Field(
+        default="", validation_alias="LA_LIBRETA_API_TOKEN"
+    )
+    public_base_url: str = ""
+    la_libreta_callback_origins: str = ""
+    la_libreta_integration_disabled: bool = False
+    # Bounded connect/read budget for one callback attempt, and the single
+    # retry the spec allows after a 5xx/transport failure.
+    callback_timeout_seconds: float = 5.0
+
+    @property
+    def callback_origins(self) -> tuple[str, ...]:
+        """The parsed `scheme://host[:port]` allowlist, lowercased."""
+        return tuple(
+            origin.strip().rstrip("/").lower()
+            for origin in self.la_libreta_callback_origins.split(",")
+            if origin.strip()
+        )
+
     # Learner-model (spec 029) tunables.
     profile_window_turns: int = 20  # rolling window for L1_reliance / fluency
     profile_top_errors: int = 3  # top-N error categories surfaced in prompt

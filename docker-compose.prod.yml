@@ -13,6 +13,10 @@
 #   ACME_EMAIL                                     — Let's Encrypt account email
 # Plus the app's own provider secrets (ANTHROPIC/OPENAI/CARTESIA keys +
 # CARTESIA_VOICE_ID + HABLE_YA_SESSION_AUTH_TOKEN) via the app service `env_file`.
+# And, for the La Libreta handoff (#033): LA_LIBRETA_API_TOKEN (required — the
+# app refuses to boot without it) and optionally
+# HABLE_YA_LA_LIBRETA_CALLBACK_ORIGINS (comma-separated HTTPS origins; empty
+# means no callback destination is permitted).
 
 services:
   app:
@@ -32,6 +36,14 @@ services:
       # environment maps MERGE across compose files, so explicitly turn the base's
       # dev opt-out back off — the #017 secure-credential fail-fast is active in prod.
       HABLE_YA_ALLOW_DEFAULT_DB_CREDENTIALS: "false"
+      # Same for #033: the base file disables the La Libreta integration, prod
+      # runs it. The canonical origin is derived from the same DOMAIN that Caddy
+      # gets its certificate for, so the URL handed back to La Libreta and the
+      # host the learner's browser lands on cannot drift apart.
+      # LA_LIBRETA_API_TOKEN and the callback allowlist come from the app
+      # `env_file`; startup refuses to boot if the token is missing.
+      HABLE_YA_LA_LIBRETA_INTEGRATION_DISABLED: "false"
+      HABLE_YA_PUBLIC_BASE_URL: https://${DOMAIN:?}
     # Same named volume as the base (declared below) — persists the turns sink.
     deploy:
       resources:
