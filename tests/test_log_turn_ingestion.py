@@ -366,3 +366,59 @@ async def test_leveling_failure_is_swallowed_and_counter_increments(
     assert sink.leveling_failed == 1
     # Calibration stays False.
     assert (await is_calibrated_async(ingest_ready)) is False
+
+
+# --------------------------------------------------------------------------- #
+# Graph-write isolation (spec #022, OQ2). The upserts moved out of the
+# relational transaction: the graph is an inspection artifact read by nothing
+# that adapts, so a cypher failure must not discard a turn's real state.
+# --------------------------------------------------------------------------- #
+
+
+async def test_graph_failure_does_not_discard_relational_state(
+    ingest_ready: asyncpg.Pool, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sink = TurnObservationSink(tmp_path / "turns.jsonl")
+    service = TurnIngestService(ingest_ready, sink=sink)
+
+    async def boom(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("AGE is unhappy")
+
+    monkeypatch.setattr(graph, "upsert_vocab", boom)
+
+    await service.ingest(_obs(errors=[{"type": "ser_estar", "produced_form": "es",
+                                       "target_form": "está"}]))
+
+    # The turn, its errors and its vocabulary all survived the graph failure.
+    async with ingest_ready.acquire() as conn:
+        turns = await conn.fetchval("SELECT count(*) FROM turns")
+        errors = await conn.fetchval("SELECT count(*) FROM error_counts")
+        vocab = await conn.fetchval("SELECT count(*) FROM vocabulary_items")
+    assert turns == 1
+    assert errors == 1
+    assert vocab > 0
+
+    # ...and the failure is counted, not swallowed silently.
+    assert sink.graph_failed == 1
+
+
+async def test_graph_failure_is_counted_but_not_raised(
+    ingest_ready: asyncpg.Pool, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sink = TurnObservationSink(tmp_path / "turns.jsonl")
+    service = TurnIngestService(ingest_ready, sink=sink)
+
+    async def boom(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("AGE is unhappy")
+
+    monkeypatch.setattr(graph, "upsert_error_pattern", boom)
+
+    # Must not propagate — a live session survives a graph outage.
+    await service.ingest(
+        _obs(
+            errors=[
+                {"type": "ser_estar", "produced_form": "es", "target_form": "está"}
+            ]
+        )
+    )
+    assert sink.graph_failed == 1

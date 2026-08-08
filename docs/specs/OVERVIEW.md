@@ -16,9 +16,14 @@ adaptive engine. The runtime is a Pipecat STT → LLM → TTS pipeline (OpenAI
 `gpt-4o-transcribe` STT + Claude `claude-sonnet-4-6` via `AnthropicLLMService` +
 Cartesia `sonic-3` TTS), exposed as a FastAPI WebSocket. Silero VAD + SmartTurn
 v3 remain small local CPU/ONNX models in-process; the runtime is otherwise
-CPU-only with no local model server. A knowledge-graph–based learner model
-(tracked via native tool calls from the agent) captures strengths, weaknesses,
-CEFR level, and progression.
+CPU-only with no local model server. A **relational** learner model (tracked
+via native tool calls from the agent) captures strengths, weaknesses, CEFR
+level, and progression — every adaptive decision the runtime makes reads from
+Postgres tables (`learner_profile`, `turns`, `error_counts`,
+`vocabulary_items`). An Apache AGE knowledge graph is written alongside it and
+is an **inspection artifact, not an input to adaptation**; #022 settled that
+after finding it read by nothing and unable to answer the traversal queries it
+was imagined for.
 
 > **Migration note.** This document is `status: inferred` and predates the
 > cloud fork on axes beyond the model boundary (it still describes parts of the

@@ -226,9 +226,47 @@ The llama.cpp GPU server and the HuggingFace-gated Gemma download were removed i
 
 **Scope decisions**
 - **Single-tenant — a decided non-goal, not an unanswered question.** The runtime serves one learner per deployment (`learner_profile CHECK (id = 1)`); no tenant isolation, no per-tenant auth, no multi-user session routing. Spec #021 settled this and wrote down the reversal cost so it stops being re-derived from the schema: composite `(learner_id, …)` PKs on `error_counts` / `vocabulary_items`, an AGE graph re-model (per-learner counters sit on shared `VocabItem` / `ErrorPattern` nodes) blocked behind #022, a real auth system replacing the shared-secret boolean in `hable_ya/auth.py`, a new global concurrency/cost ceiling in place of #016's single active session, ~41 `WHERE id = 1`-class SQL sites, and login/logout in the SPA. The learner does have a name — `learner_profile.display_name`, nullable, set through `PATCH /api/learner` (#021) — but a name is not an account. See [021-learner-identity](021-learner-identity/spec.md) Key Decision 4.
-- **Knowledge graph storage.** The learner model graph is stored in Apache AGE (Postgres extension), colocated with relational learner state in the same Postgres instance.
+- **Knowledge graph storage — an inspection artifact, not an adaptation input (#022).** The graph is stored in Apache AGE (Postgres extension), colocated with relational learner state in the same Postgres instance. It is written on every turn and read by exactly one thing: `graph.graph_summary()`, surfaced on the dev-gated `/dev/learner`. **Every adaptive decision is relational** — prompt profile, theme selection, leveling and `/api/learner` all read Postgres tables. #022 measured the graph writes at ~3ms and ~59% of the ingest transaction (0.15% of a turn's latency budget) and moved them *after* the relational commit, best-effort with a `graph_failed` counter, so a decorative write cannot roll back load-bearing state. The graph keeps accumulating so a future spec inherits history rather than an empty graph; making it load-bearing would be a re-modelling spec, not a query (see the schema note below).
 
 **Inferred uncertainties**
 - `[INFERRED: uncertain]` — deployment target (edge device class, OS, memory budget) is not specified in the repo.
 - `[INFERRED: uncertain]` — session lifecycle for `/ws/session` (reconnect/resume, session-id scheme) is undefined.
-- `[INFERRED: uncertain]` — concrete AGE graph schema (node/edge labels for skills, concepts, errors, progression) is not yet designed.
+- ~~`[INFERRED: uncertain]` — concrete AGE graph schema is not yet designed.~~ **Resolved (#022): it shipped in `bd55d203ae25` and is documented below.**
+
+### AGE graph schema (`learner_knowledge`)
+
+Read out of `hable_ya/learner/graph.py`, which is the only writer. Four node
+labels, three edge types:
+
+| Node | Key property | Counter | Written by |
+|---|---|---|---|
+| `Learner` | `id` (always `1`) | — | `ensure_learner_node` |
+| `Scenario` | `domain`, `band` | — | `ensure_scenario_nodes`, `link_session_to_scenario` |
+| `VocabItem` | `lemma` | `production_count`, `last_seen_at` | `upsert_vocab` |
+| `ErrorPattern` | `category` | `occurrences`, `last_seen_at` | `upsert_error_pattern` |
+
+| Edge | Shape | Properties |
+|---|---|---|
+| `PRODUCED` | `(Learner)→(VocabItem)` | `last_at` |
+| `MADE_ERROR` | `(Learner)→(ErrorPattern)` | `occurrences`, `last_at` |
+| `ENGAGED_WITH` | `(Learner)→(Scenario)` | `last_at` |
+
+Three properties of this model are worth knowing before proposing a query:
+
+- **It is a star, not a network.** Every edge originates at `(:Learner {id: 1})`.
+  There is no `VocabItem`↔`VocabItem`, `ErrorPattern`↔`ErrorPattern`, or
+  `VocabItem`↔`Scenario` edge, so error co-occurrence — the traversal the graph
+  was imagined for — returns nothing. `error_observations` joined on `turn_id`
+  answers it in one query.
+- **Counters are duplicated on node *and* edge**, and the node-level ones are
+  global. `v.production_count` / `e.occurrences` sit on a shared node while
+  `r.occurrences` sits on the per-learner edge. Harmless single-tenant; it is
+  the concrete obstacle #021 Key Decision 4 recorded for multi-user, since two
+  learners producing *viajar* would inflate one node.
+- **`ENGAGED_WITH` keeps no history.** `MERGE … SET r.last_at` overwrites, so
+  three engagements with one scenario leave one edge carrying only the latest
+  timestamp — strictly less than the `sessions` table beside it.
+
+The error counter is `occurrences`, not `count`, because AGE's cypher parser
+rejects `SET x.count = …` — the identifier collides with the `count()`
+aggregate. The relational `error_counts.count` column is unaffected.

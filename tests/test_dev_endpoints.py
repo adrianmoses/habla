@@ -129,3 +129,55 @@ async def test_learner_endpoint_cold_start(
     assert body["profile"]["is_calibrated"] is False
     assert body["band_history"] == []
     assert body["recent_turn_bands"] == []
+
+
+# --------------------------------------------------------------------------- #
+# The graph block (spec #022) — the AGE graph's only reader.
+# --------------------------------------------------------------------------- #
+
+
+async def test_learner_endpoint_graph_block_matches_the_writers(
+    clean_learner_state: asyncpg.Pool, tmp_path: Path
+) -> None:
+    from hable_ya.learner import graph
+
+    at = datetime(2026, 4, 22, 12, 0, 0, tzinfo=UTC)
+    async with clean_learner_state.acquire() as conn:
+        await graph.ensure_learner_node(conn)
+        await graph.upsert_vocab(conn, lemma="viajar", at=at)
+        await graph.upsert_error_pattern(conn, category="ser_estar", at=at)
+
+    sink = TurnObservationSink(tmp_path / "turns.jsonl")
+    app = _app_with_state(pool=clean_learner_state, sink=sink)
+    r = await _get(app, "/dev/learner")
+    assert r.status_code == 200
+
+    block = r.json()["graph"]
+    assert block["graph"] == graph.GRAPH
+    assert block["nodes"]["Learner"] == 1
+    assert block["nodes"]["VocabItem"] == 1
+    assert block["nodes"]["ErrorPattern"] == 1
+    assert block["edges"]["PRODUCED"] == 1
+    assert block["edges"]["MADE_ERROR"] == 1
+    assert block["top_vocab"] == [{"lemma": "viajar", "production_count": 1}]
+
+
+async def test_learner_endpoint_graph_block_on_empty_graph(
+    clean_learner_state: asyncpg.Pool, tmp_path: Path
+) -> None:
+    # clean_learner_state already strips the graph. A fresh deployment must
+    # return zeros here, not a 500 from the inspector.
+    sink = TurnObservationSink(tmp_path / "turns.jsonl")
+    app = _app_with_state(pool=clean_learner_state, sink=sink)
+    r = await _get(app, "/dev/learner")
+    assert r.status_code == 200
+    assert all(v == 0 for v in r.json()["graph"]["nodes"].values())
+
+
+async def test_observations_endpoint_exposes_graph_failed(tmp_path: Path) -> None:
+    sink = TurnObservationSink(tmp_path / "turns.jsonl")
+    sink.graph_failed = 2
+    app = _app_with_state(pool=None, sink=sink)
+    r = await _get(app, "/dev/observations")
+    assert r.status_code == 200
+    assert r.json()["graph_failed"] == 2
