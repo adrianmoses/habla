@@ -16,6 +16,7 @@ from urllib.parse import urlsplit
 
 from fastapi import FastAPI
 
+from api.routes.external_sessions import router as external_sessions_router
 from api.routes.health import router as health_router
 from api.routes.learner import router as learner_router
 from api.routes.session import router as session_router
@@ -137,6 +138,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(title="hable-ya", lifespan=lifespan)
 app.include_router(health_router)
+app.include_router(external_sessions_router)
 app.include_router(session_router)
 app.include_router(learner_router)
 

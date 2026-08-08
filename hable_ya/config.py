@@ -91,6 +91,12 @@ class Settings(BaseSettings):
     # reaping half-open connections without needing a new one to evict them.
     session_idle_timeout_secs: float = 300.0
 
+    # La Libreta server-to-server session handoff (spec #032).
+    la_libreta_api_token: str = Field(
+        default="", validation_alias="LA_LIBRETA_API_TOKEN"
+    )
+    public_base_url: str = ""
+
     # Learner-model (spec 029) tunables.
     profile_window_turns: int = 20  # rolling window for L1_reliance / fluency
     profile_top_errors: int = 3  # top-N error categories surfaced in prompt

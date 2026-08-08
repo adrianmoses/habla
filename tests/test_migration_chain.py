@@ -46,6 +46,7 @@ CHAIN: tuple[tuple[str, str], ...] = (
     ("99507a1b3027", "table:band_history"),
     ("c7f3a9b21d84", "column:sessions.mode"),
     ("f1e6a742b90c", "column:learner_profile.display_name"),
+    ("6a7b8c9d0e1f", "table:external_session_handoffs"),
 )
 
 LEARNER_TABLES = (
@@ -56,6 +57,7 @@ LEARNER_TABLES = (
     "error_counts",
     "vocabulary_items",
     "band_history",
+    "external_session_handoffs",
 )
 
 
