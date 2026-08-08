@@ -23,6 +23,11 @@ dependencies = [
     # Utilities
     "langdetect>=1.0.9",
     "tenacity>=9.0.0",              # retries for tool calls
+    # Outbound HTTP for the #033 completion callback. Already present
+    # transitively (anthropic and openai both require it), but declared
+    # directly because runtime code now imports it: a transitive dependency is
+    # not a promise, and dropping either SDK would break the callback.
+    "httpx>=0.27.0",
     # NLP — Spanish lemmatization for runtime vocabulary tracking (#029) and
     # recast scoring (eval).
     #

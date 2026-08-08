@@ -35,6 +35,7 @@ def upgrade() -> None:
             completed_at TIMESTAMPTZ,
             callback_attempts SMALLINT NOT NULL DEFAULT 0,
             callback_delivered_at TIMESTAMPTZ,
+            callback_last_error TEXT,
             UNIQUE (source, source_ref, source_date)
         );
         """

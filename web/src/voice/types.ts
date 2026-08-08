@@ -12,4 +12,12 @@ export type Speaker = 'idle' | 'user' | 'agent';
 export type SessionRequest = {
   mode: ConversationMode;
   topic?: string;
+  /**
+   * An opaque La Libreta handoff id (spec #033), carried as `?handoff=`.
+   *
+   * Only the id travels. The server re-reads the consigna, structures and
+   * target from its own row after the auth gate, so the prompt the tutor is
+   * given cannot be rewritten from the browser.
+   */
+  handoff?: string;
 };

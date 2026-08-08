@@ -4,7 +4,7 @@ import AgentCard from '../components/AgentCard';
 import AppShell from '../components/AppShell';
 import OrbHalo from '../components/orb/OrbHalo';
 import { ArrowRightIcon, MicIcon } from '../components/icons';
-import { Empty, ErrorNotice } from '../components/ui';
+import { Empty, ErrorNotice, TokenPrompt } from '../components/ui';
 import { useHealth } from '../lib/health';
 import {
   computeStreak,
@@ -22,7 +22,6 @@ import {
   useSessionToken,
 } from '../lib/learner';
 import { navigate } from '../lib/router';
-import { setSessionToken } from '../lib/token';
 import type { ConversationMode } from '../lib/types';
 import type { SessionRequest } from '../voice/types';
 
@@ -61,16 +60,9 @@ export default function Home({ onStart, error }: Props) {
   // Session-auth token (spec #018, OQ1 Option B): pasted once by the operator,
   // kept in sessionStorage — never baked into the bundle. Read reactively, so
   // saving one immediately starts the learner fetches and a 401 (which clears
-  // it in `apiGet`) drops straight back to this prompt.
-  const [tokenDraft, setTokenDraft] = useState('');
+  // it in `apiGet`) drops straight back to this prompt. The prompt itself is
+  // `TokenPrompt`, shared with the #033 deep link.
   const hasToken = useSessionToken() !== undefined;
-
-  const saveToken = () => {
-    const t = tokenDraft.trim();
-    if (!t) return;
-    setSessionToken(t);
-    setTokenDraft('');
-  };
 
   const ready = health === 'ready';
   const warming = health === 'warming' || health === 'unknown';
@@ -164,79 +156,7 @@ export default function Home({ onStart, error }: Props) {
           )}
 
           {!hasToken ? (
-            <div
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 10,
-                maxWidth: 520,
-              }}
-            >
-              <label
-                style={{
-                  fontFamily: 'var(--mono)',
-                  fontSize: 11,
-                  letterSpacing: '0.12em',
-                  textTransform: 'uppercase',
-                  color: 'var(--muted)',
-                }}
-              >
-                Token de acceso
-              </label>
-              <div style={{ display: 'flex', gap: 10 }}>
-                <input
-                  type="password"
-                  value={tokenDraft}
-                  onChange={(e) => setTokenDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') saveToken();
-                  }}
-                  placeholder="Pega el token del servidor…"
-                  autoComplete="off"
-                  style={{
-                    flex: 1,
-                    padding: '14px 16px',
-                    borderRadius: 12,
-                    border: '1px solid var(--line)',
-                    background: 'var(--cream-2)',
-                    color: 'var(--ink)',
-                    fontFamily: 'var(--mono)',
-                    fontSize: 13,
-                    outline: 'none',
-                  }}
-                />
-                <button
-                  type="button"
-                  onClick={saveToken}
-                  disabled={!tokenDraft.trim()}
-                  style={{
-                    padding: '14px 22px',
-                    borderRadius: 12,
-                    border: 'none',
-                    background: tokenDraft.trim()
-                      ? 'var(--ink)'
-                      : 'var(--muted)',
-                    color: 'var(--cream)',
-                    fontFamily: 'var(--sans)',
-                    fontSize: 14,
-                    fontWeight: 500,
-                    cursor: tokenDraft.trim() ? 'pointer' : 'not-allowed',
-                  }}
-                >
-                  Guardar
-                </button>
-              </div>
-              <div
-                style={{
-                  fontSize: 12,
-                  color: 'var(--muted)',
-                  fontFamily: 'var(--mono)',
-                  letterSpacing: '0.04em',
-                }}
-              >
-                Se guarda solo en esta pestaña · no se envía a ningún tercero.
-              </div>
-            </div>
+            <TokenPrompt />
           ) : (
             <>
               {/* Conversation mode (spec #023). Fixed at session start — the

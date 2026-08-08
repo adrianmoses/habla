@@ -172,7 +172,12 @@ export function isAuthError(error: Error | null): boolean {
  */
 export function useAuthGuard(route: string): void {
   const token = useSessionToken();
-  const stranded = token === undefined && route !== 'home';
+  // `handoff` is exempt (spec #033). A La Libreta deep link must survive the
+  // auth round trip: bouncing a tokenless visitor to Home would lose the id
+  // they arrived with, so that screen asks for the token in place and resumes
+  // the same pre-session view once it is saved.
+  const stranded =
+    token === undefined && route !== 'home' && route !== 'handoff';
   useEffect(() => {
     if (stranded) navigate('home');
   }, [stranded]);

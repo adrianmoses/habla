@@ -35,7 +35,7 @@ function defaultWsUrl(): string {
  * default rather than breaking the handshake. The default open-with-no-topic
  * request produces the exact URL this client used before #020.
  */
-function withRequest(url: string, request?: SessionRequest): string {
+export function withRequest(url: string, request?: SessionRequest): string {
   if (!request) return url;
   const params = new URLSearchParams();
   if (request.mode !== 'open') params.set('mode', request.mode);
@@ -46,6 +46,10 @@ function withRequest(url: string, request?: SessionRequest): string {
     if (!params.has('mode')) params.set('mode', request.mode);
     params.set('topic', topic);
   }
+  // Spec #033: the handoff id, and only the id. The server resolves it to the
+  // authoritative prompt after checking the session token, so nothing of
+  // La Libreta's payload rides in a URL the learner can edit.
+  if (request.handoff) params.set('handoff', request.handoff);
   const qs = params.toString();
   return qs ? `${url}?${qs}` : url;
 }

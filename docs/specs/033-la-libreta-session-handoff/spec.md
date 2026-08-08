@@ -2,8 +2,8 @@
 
 | Field | Value |
 |---|---|
-| id | 032 |
-| status | draft |
+| id | 033 |
+| status | implemented |
 | created | 2026-08-08 |
 | upstream contract | `la-libreta/docs/specs/012-deep-links/companion-interface.md` |
 
@@ -222,40 +222,40 @@ public.
 
 ### Acceptance Criteria
 
-- [ ] `POST /api/sessions` implements the exact request, response, status, and
+- [x] `POST /api/sessions` implements the exact request, response, status, and
       forward-compatibility contract above.
-- [ ] Integration auth uses a dedicated bearer secret and constant-time token
+- [x] Integration auth uses a dedicated bearer secret and constant-time token
       comparison; missing or invalid credentials return `401`.
-- [ ] `(source, sourceRef, date)` idempotency is enforced in the database and
+- [x] `(source, sourceRef, date)` idempotency is enforced in the database and
       remains correct under concurrent requests.
-- [ ] The stored first payload wins on idempotent replays; replay does not alter
+- [x] The stored first payload wins on idempotent replays; replay does not alter
       `createdAt` or callback state.
-- [ ] Response URLs use a configured canonical public origin and opaque ids.
-- [ ] `GET /session/:id` is a real deep link with pre-session, not-found, and
+- [x] Response URLs use a configured canonical public origin and opaque ids.
+- [x] `GET /session/:id` is a real deep link with pre-session, not-found, and
       end-user-auth states; reload never auto-starts microphone or providers.
-- [ ] Starting the session resolves the server-owned handoff and steers the
+- [x] Starting the session resolves the server-owned handoff and steers the
       system-built conversation prompt with its verbatim prompt, structures,
       and target.
-- [ ] The browser never receives the La Libreta integration token and cannot
+- [x] The browser never receives the La Libreta integration token and cannot
       substitute authoritative handoff content.
-- [ ] Completing a handoff-backed session persists one completion timestamp and
+- [x] Completing a handoff-backed session persists one completion timestamp and
       performs the optional callback without blocking the learner experience.
-- [ ] Callback delivery retries once on `5xx`/transport failure, never on `4xx`,
+- [x] Callback delivery retries once on `5xx`/transport failure, never on `4xx`,
       uses bounded timeouts, and cannot deliver twice successfully.
-- [ ] Callback URL validation and delivery prevent SSRF and redirects as
+- [x] Callback URL validation and delivery prevent SSRF and redirects as
       described above.
-- [ ] Logs and errors contain no bearer tokens; lifecycle and callback failures
+- [x] Logs and errors contain no bearer tokens; lifecycle and callback failures
       remain diagnosable by handoff id and source reference.
-- [ ] Alembic upgrade and downgrade tests cover the new persistence schema.
-- [ ] API tests cover validation, unknown-field tolerance, auth, idempotency,
+- [x] Alembic upgrade and downgrade tests cover the new persistence schema.
+- [x] API tests cover validation, unknown-field tolerance, auth, idempotency,
       concurrency, payload mismatch, and canonical response URLs.
-- [ ] Frontend tests cover direct navigation, reload, unknown ids, auth recovery,
+- [x] Frontend tests cover direct navigation, reload, unknown ids, auth recovery,
       explicit start, and rendering contract fields verbatim.
-- [ ] Callback tests cover absence, success, timeout, one retry on `5xx`, no
+- [x] Callback tests cover absence, success, timeout, one retry on `5xx`, no
       retry on `4xx`, duplicate completion, and rejected destinations.
-- [ ] Existing WebSocket authentication, single-session preemption, targeted
+- [x] Existing WebSocket authentication, single-session preemption, targeted
       conversations, and ordinary Home-started sessions continue to pass.
-- [ ] `ruff`, `mypy`, Python tests, and frontend tests/build pass.
+- [x] `ruff`, `mypy`, Python tests, and frontend tests/build pass.
 
 ### Non-Goals
 

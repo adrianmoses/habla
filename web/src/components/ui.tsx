@@ -5,6 +5,8 @@
 // three screens don't each re-declare them inline.
 
 import type { CSSProperties, ReactNode } from 'react';
+import { useState } from 'react';
+import { setSessionToken } from '../lib/token';
 
 export const page: CSSProperties = {
   flex: 1,
@@ -123,6 +125,94 @@ export function ErrorNotice({ children }: { children: ReactNode }) {
       }}
     >
       {children}
+    </div>
+  );
+}
+
+/**
+ * The session-token paste prompt (spec #018 OQ1 Option B).
+ *
+ * Lifted out of Home when #033 gave it a second home: a La Libreta deep link
+ * has to ask for the token *without navigating*, since bouncing to Home would
+ * discard the handoff id the visitor arrived with. Same widget, two screens,
+ * one definition — writing it twice is how the two copies start disagreeing
+ * about what a rejected token looks like.
+ */
+export function TokenPrompt({ label }: { label?: string }) {
+  const [draft, setDraft] = useState('');
+  const save = () => {
+    const token = draft.trim();
+    if (!token) return;
+    setSessionToken(token);
+    setDraft('');
+  };
+
+  return (
+    <div
+      style={{ display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 520 }}
+    >
+      <label
+        style={{
+          fontFamily: 'var(--mono)',
+          fontSize: 11,
+          letterSpacing: '0.12em',
+          textTransform: 'uppercase',
+          color: 'var(--muted)',
+        }}
+      >
+        {label ?? 'Token de acceso'}
+      </label>
+      <div style={{ display: 'flex', gap: 10 }}>
+        <input
+          type="password"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') save();
+          }}
+          placeholder="Pega el token del servidor…"
+          autoComplete="off"
+          style={{
+            flex: 1,
+            padding: '14px 16px',
+            borderRadius: 12,
+            border: '1px solid var(--line)',
+            background: 'var(--cream-2)',
+            color: 'var(--ink)',
+            fontFamily: 'var(--mono)',
+            fontSize: 13,
+            outline: 'none',
+          }}
+        />
+        <button
+          type="button"
+          onClick={save}
+          disabled={!draft.trim()}
+          style={{
+            padding: '14px 22px',
+            borderRadius: 12,
+            border: 'none',
+            background: draft.trim() ? 'var(--ink)' : 'var(--muted)',
+            color: 'var(--cream)',
+            fontFamily: 'var(--sans)',
+            fontSize: 14,
+            fontWeight: 500,
+            cursor: draft.trim() ? 'pointer' : 'not-allowed',
+          }}
+        >
+          Guardar
+        </button>
+      </div>
+      <div
+        style={{
+          fontSize: 12,
+          color: 'var(--muted)',
+          fontFamily: 'var(--mono)',
+          letterSpacing: '0.04em',
+        }}
+      >
+        Se guarda solo en esta pestaña · no se envía a ningún tercero.
+      </div>
     </div>
   );
 }

@@ -19,7 +19,19 @@ from hable_ya.config import settings
 config = context.config
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # `disable_existing_loggers=False` is load-bearing, not tidiness.
+    #
+    # `fileConfig` defaults to True, which sets `disabled = True` on every
+    # logger that already exists and is not named in `alembic.ini` — and this
+    # module runs *inside the live app*: `api/main.py`'s lifespan calls
+    # `upgrade_to_head()` after the routers have been imported. With the
+    # default, every module logger created at import time
+    # (`hable_ya.api.session`, `hable_ya.api.external_sessions`,
+    # `hable_ya.handoff.callback`, the learner loggers…) is silenced for the
+    # rest of the process — a server that has finished booting logs nothing
+    # from the code that matters. Found via #033, whose contract requires
+    # callback and lifecycle failures to stay diagnosable.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 config.set_main_option("sqlalchemy.url", settings.async_database_url)
 

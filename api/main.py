@@ -86,12 +86,52 @@ def require_secure_db_credentials(cfg: Settings) -> None:
         )
 
 
+def require_integration_config(cfg: Settings) -> None:
+    """Fail fast when the La Libreta integration is on but unconfigured (#033).
+
+    Two values have to be present together or the endpoint is not merely
+    degraded, it is wrong: without `LA_LIBRETA_API_TOKEN` every create is
+    rejected (fail-closed, but silently — La Libreta would see `401`s with no
+    server-side explanation), and without `HABLE_YA_PUBLIC_BASE_URL` a create
+    that passed auth could not build the browser URL that is the whole point of
+    the handoff. Refusing to boot turns both into an operator-visible error
+    instead of a runtime mystery.
+
+    `la_libreta_integration_disabled` is the explicit local-dev opt-out, mirroring
+    `session_auth_disabled` (#016) and `allow_default_db_credentials` (#017). An
+    *unset* token is never the opt-out — that would make forgetting to configure
+    the integration indistinguishable from choosing not to run it.
+
+    The callback allowlist is deliberately not required here: no configured
+    origin is a valid production posture (accept handoffs, deliver no
+    callbacks), and it fails closed at create time with a `400`.
+    """
+    if cfg.la_libreta_integration_disabled:
+        return
+    missing = [
+        env
+        for env, value in (
+            ("LA_LIBRETA_API_TOKEN", cfg.la_libreta_api_token),
+            ("HABLE_YA_PUBLIC_BASE_URL", cfg.public_base_url),
+        )
+        if not value
+    ]
+    if missing:
+        raise RuntimeError(
+            f"La Libreta integration is enabled but {', '.join(missing)} "
+            "is unset. Configure it, or set "
+            "HABLE_YA_LA_LIBRETA_INTEGRATION_DISABLED=true to run without the "
+            "integration."
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.ready = False
     app.state.settings = settings
     require_cloud_secrets(settings)
     require_secure_db_credentials(settings)
+    require_integration_config(settings)
     if not settings.session_auth_token and not settings.session_auth_disabled:
         logger.error(
             "HABLE_YA_SESSION_AUTH_TOKEN is unset and session_auth_disabled is "

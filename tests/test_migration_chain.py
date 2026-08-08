@@ -28,6 +28,7 @@ bite, and residue is demonstrably real here — `DROP EXTENSION age` leaves the
 from __future__ import annotations
 
 import asyncio
+import logging
 from pathlib import Path
 
 import asyncpg
@@ -227,3 +228,31 @@ async def test_each_revision_round_trips(conn: asyncpg.Connection) -> None:
         )
 
     await _run(command.upgrade, "head")
+
+
+async def test_running_a_migration_does_not_silence_the_app_loggers(
+    conn: asyncpg.Connection,
+) -> None:
+    """Alembic's `fileConfig` must not disable the loggers already in memory.
+
+    Not a migration property — a *hosting* property, and a real defect until
+    #033 tripped over it. `api/main.py`'s lifespan calls `upgrade_to_head()`
+    after the routers are imported, so `env.py` runs inside the live process
+    with every module logger already created. `fileConfig` defaults to
+    `disable_existing_loggers=True`, which set `disabled = True` on all of them
+    for the rest of the process: a server that finished booting logged nothing
+    from its own request paths, silently and permanently.
+
+    Asserted here because this file is the only place that drives alembic
+    end-to-end, and the failure is invisible to every test that does not read
+    log output.
+    """
+    logger = logging.getLogger("hable_ya.api.session")
+    assert logger.disabled is False, "precondition: the logger starts enabled"
+
+    await _run(command.upgrade, "head")
+
+    assert logger.disabled is False, (
+        "an alembic run disabled an application logger — check "
+        "`disable_existing_loggers=False` in hable_ya/db/alembic/env.py"
+    )
