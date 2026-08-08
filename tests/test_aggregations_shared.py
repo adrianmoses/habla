@@ -133,8 +133,7 @@ def test_truncates_to_top_n_limits() -> None:
         error_counter={"a": 5, "b": 4, "c": 3, "d": 2, "e": 1},
         error_last_seen={k: base for k in "abcde"},
         vocab_last_seen={
-            lemma: base.replace(minute=i)
-            for i, lemma in enumerate(["x", "y", "z"])
+            lemma: base.replace(minute=i) for i, lemma in enumerate(["x", "y", "z"])
         },
         top_errors=2,
         top_vocab=2,

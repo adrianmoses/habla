@@ -54,9 +54,12 @@ def test_pauses_no_segments_is_one_long_silence() -> None:
 
 def test_pauses_midclause_counts_only_unterminated() -> None:
     segs = [SpeechSegment(0.0, 2.0), SpeechSegment(3.0, 5.0), SpeechSegment(6.0, 8.0)]
-    words = [w("fui a", 0.0, 1.0), w("la", 1.0, 2.0),  # midclause pause after
-             w("tienda.", 3.0, 5.0),                   # sentence-final pause after
-             w("luego", 6.0, 8.0)]
+    words = [
+        w("fui a", 0.0, 1.0),
+        w("la", 1.0, 2.0),  # midclause pause after
+        w("tienda.", 3.0, 5.0),  # sentence-final pause after
+        w("luego", 6.0, 8.0),
+    ]
     assert metrics.pauses_midclause_n(segs, words, threshold_s=0.7) == 1
 
 
@@ -68,10 +71,11 @@ def test_pauses_midclause_leading_silence_ignored() -> None:
 
 def test_fillers_unigram_bigram_and_punctuation() -> None:
     words = [
-        w("Bueno,", 0, 1),      # plain single, punctuation stripped
-        w("o", 1, 2), w("sea", 2, 3),  # bigram phrase
-        w("no", 3, 4),          # plain "no" must NOT match "¿no?"
-        w("¿no?", 4, 5),        # punctuation-significant single
+        w("Bueno,", 0, 1),  # plain single, punctuation stripped
+        w("o", 1, 2),
+        w("sea", 2, 3),  # bigram phrase
+        w("no", 3, 4),  # plain "no" must NOT match "¿no?"
+        w("¿no?", 4, 5),  # punctuation-significant single
         w("casa", 5, 6),
     ]
     assert metrics.fillers_n(words) == 3
@@ -95,9 +99,10 @@ def test_mtld_higher_for_more_diverse_text() -> None:
 
 
 def test_repeats_counts_unigram_and_bigram() -> None:
-    words = [w(t, i, i + 1) for i, t in enumerate(
-        ["yo", "yo", "fui", "a", "la", "a", "la", "tienda"]
-    )]
+    words = [
+        w(t, i, i + 1)
+        for i, t in enumerate(["yo", "yo", "fui", "a", "la", "a", "la", "tienda"])
+    ]
     # "yo yo" (unigram) + "a la a la" (bigram) = 2
     assert metrics.repeats_n(words) == 2
 
@@ -105,7 +110,7 @@ def test_repeats_counts_unigram_and_bigram() -> None:
 def test_low_conf_spans_requires_run_of_two() -> None:
     words = [
         w("claro", 0, 1, prob=0.9),
-        w("mm", 1, 2, prob=0.3),    # lone low-conf word: no span
+        w("mm", 1, 2, prob=0.3),  # lone low-conf word: no span
         w("bien", 2, 3, prob=0.9),
         w("algo", 3, 4, prob=0.2),  # run of two → span
         w("raro", 4, 5, prob=0.4),
@@ -133,11 +138,23 @@ def test_compute_metrics_has_contract_keys() -> None:
         thresholds=Thresholds(),
     )
     assert set(result) == {
-        "duration_s", "speech_time_s", "wpm_gross", "wpm_articulation",
-        "pauses_n", "pauses_total_s", "pause_max_s", "pauses_midclause_n",
-        "fillers_n", "fillers_per_min", "connectors_unique_n",
-        "connectors_formal_ratio", "ttr", "mtld", "repeats_n",
-        "low_conf_spans_n", "vad_transcript_gap_s",
+        "duration_s",
+        "speech_time_s",
+        "wpm_gross",
+        "wpm_articulation",
+        "pauses_n",
+        "pauses_total_s",
+        "pause_max_s",
+        "pauses_midclause_n",
+        "fillers_n",
+        "fillers_per_min",
+        "connectors_unique_n",
+        "connectors_formal_ratio",
+        "ttr",
+        "mtld",
+        "repeats_n",
+        "low_conf_spans_n",
+        "vad_transcript_gap_s",
     }
     assert result["wpm_gross"] == pytest.approx(5.0)
     assert result["fillers_n"] == 1  # "pues"

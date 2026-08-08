@@ -145,8 +145,7 @@ async def test_repo_delegates_to_compute_snapshot(
     # Reconstruct compute_snapshot inputs from the same DB state.
     async with clean_learner_state.acquire() as conn:
         turn_rows = await conn.fetch(
-            "SELECT L1_used, fluency_signal FROM turns "
-            "ORDER BY timestamp DESC LIMIT 20"
+            "SELECT L1_used, fluency_signal FROM turns ORDER BY timestamp DESC LIMIT 20"
         )
         error_rows = await conn.fetch(
             "SELECT category, count, last_seen_at FROM error_counts"
@@ -161,9 +160,7 @@ async def test_repo_delegates_to_compute_snapshot(
         sessions_completed=0,
         l1_used_flags=[bool(r["l1_used"]) for r in turn_rows],
         fluency_signals=[r["fluency_signal"] for r in turn_rows],
-        error_counter=Counter(
-            {r["category"]: int(r["count"]) for r in error_rows}
-        ),
+        error_counter=Counter({r["category"]: int(r["count"]) for r in error_rows}),
         error_last_seen={r["category"]: r["last_seen_at"] for r in error_rows},
         vocab_last_seen={r["lemma"]: r["last_seen_at"] for r in vocab_rows},
         top_errors=3,

@@ -153,6 +153,7 @@ async def test_pool_with_zero_sessions_renders_neutral(
         "hable_ya.pipeline.prompts.builder.LearnerProfileRepo",
         lambda _pool: mock_repo,
     )
+
     # Spec 049: cold-start gate now keys on is_calibrated_async, not on
     # sessions_completed > 0. Force it False for the uncalibrated path.
     async def _is_calibrated_false(_pool: object) -> bool:
@@ -342,9 +343,7 @@ async def test_calibrated_debate_routes_through_mode_factory(
     _calibrated(monkeypatch)
     seen: list[ConversationConfig] = []
 
-    def recording_build_mode_theme(
-        config: ConversationConfig, **_kw: object
-    ) -> Theme:
+    def recording_build_mode_theme(config: ConversationConfig, **_kw: object) -> Theme:
         seen.append(config)
         return _NEUTRAL_THEME.model_copy(update={"domain": "debate: x"})
 

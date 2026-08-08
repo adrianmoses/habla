@@ -22,6 +22,12 @@ from hable_ya.db import close_pool, open_pool, upgrade_to_head
 
 TEST_DB_NAME = "hable_ya_test"
 
+#: Separate from `TEST_DB_NAME` on purpose (spec #031). The migration-chain tests
+#: run `downgrade base`, which drops every learner table and the AGE extension —
+#: doing that to the shared session database would pull the schema out from under
+#: every test that runs after them.
+MIGRATION_DB_NAME = "hable_ya_migration_test"
+
 
 def _replace_path(dsn: str, new_path: str) -> str:
     parts = urlparse(dsn)
@@ -55,19 +61,19 @@ def _override_database_url(url: str) -> Iterator[None]:
         settings.database_url = original
 
 
-async def _drop_and_create_test_db() -> None:
+async def _drop_and_create_test_db(name: str = TEST_DB_NAME) -> None:
     conn = await asyncpg.connect(dsn=_admin_dsn())
     try:
-        await conn.execute(f"DROP DATABASE IF EXISTS {TEST_DB_NAME} WITH (FORCE);")
-        await conn.execute(f"CREATE DATABASE {TEST_DB_NAME};")
+        await conn.execute(f"DROP DATABASE IF EXISTS {name} WITH (FORCE);")
+        await conn.execute(f"CREATE DATABASE {name};")
     finally:
         await conn.close()
 
 
-async def _drop_test_db() -> None:
+async def _drop_test_db(name: str = TEST_DB_NAME) -> None:
     conn = await asyncpg.connect(dsn=_admin_dsn())
     try:
-        await conn.execute(f"DROP DATABASE IF EXISTS {TEST_DB_NAME} WITH (FORCE);")
+        await conn.execute(f"DROP DATABASE IF EXISTS {name} WITH (FORCE);")
     finally:
         await conn.close()
 
@@ -90,6 +96,42 @@ async def db_pool() -> AsyncIterator[asyncpg.Pool]:
         finally:
             await close_pool(pool)
     await _drop_test_db()
+
+
+@pytest_asyncio.fixture
+async def migration_db() -> AsyncIterator[str]:
+    """An empty, unmigrated, throwaway database for the migration-chain tests.
+
+    Yields its DSN with `settings.database_url` pointed at it for the duration —
+    which is what redirects alembic, since `env.py` builds `sqlalchemy.url` from
+    `settings.async_database_url`, a derived property over `database_url`.
+
+    Deliberately *not* migrated on the way in: these tests drive `upgrade` and
+    `downgrade` themselves and need to control the starting revision. Deliberately
+    not the session `db_pool` database either — see `MIGRATION_DB_NAME`.
+
+    Function-scoped, so a test that fails mid-chain cannot hand a half-migrated
+    database to the next one. That was measured rather than assumed (spec #031
+    Open Question 1): the whole file runs in ~1s, because in-process alembic calls
+    cost SQL rather than interpreter startup, so isolation is affordable. A shared
+    database made a single failure cascade into an unrelated-looking SQL error in
+    the following test — the same fragility this fixture exists to keep away from
+    the session `db_pool`.
+    """
+    admin_dsn = _admin_dsn()
+    if not await _probe_reachable(admin_dsn):
+        pytest.skip(
+            f"Postgres not reachable at {admin_dsn}; "
+            "run `docker compose up db` to enable DB tests."
+        )
+
+    await _drop_and_create_test_db(MIGRATION_DB_NAME)
+    dsn = _replace_path(settings.database_url, f"/{MIGRATION_DB_NAME}")
+    try:
+        with _override_database_url(dsn):
+            yield dsn
+    finally:
+        await _drop_test_db(MIGRATION_DB_NAME)
 
 
 @pytest_asyncio.fixture

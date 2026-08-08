@@ -94,9 +94,7 @@ def test_place_band_signals_counts_only_valid() -> None:
         (["C1", "C1", "C1"], "C1"),
     ],
 )
-def test_place_band_table(
-    bands: list[CEFRBand | None], expected: CEFRBand
-) -> None:
+def test_place_band_table(bands: list[CEFRBand | None], expected: CEFRBand) -> None:
     decision = place_band(bands, floor_band="A2", min_valid_turns=3)
     assert decision is not None
     assert decision.band == expected

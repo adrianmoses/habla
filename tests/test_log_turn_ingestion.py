@@ -328,9 +328,7 @@ async def test_post_placement_all_null_bands_are_no_op(
     # Band unchanged. No new band_history row.
     assert (await current_band(ingest_ready)) == "A2"
     async with ingest_ready.acquire() as conn:
-        history_count = await conn.fetchval(
-            "SELECT count(*) FROM band_history"
-        )
+        history_count = await conn.fetchval("SELECT count(*) FROM band_history")
     assert history_count == 1  # only the placement row
 
 
@@ -386,8 +384,11 @@ async def test_graph_failure_does_not_discard_relational_state(
 
     monkeypatch.setattr(graph, "upsert_vocab", boom)
 
-    await service.ingest(_obs(errors=[{"type": "ser_estar", "produced_form": "es",
-                                       "target_form": "está"}]))
+    await service.ingest(
+        _obs(
+            errors=[{"type": "ser_estar", "produced_form": "es", "target_form": "está"}]
+        )
+    )
 
     # The turn, its errors and its vocabulary all survived the graph failure.
     async with ingest_ready.acquire() as conn:
@@ -416,9 +417,7 @@ async def test_graph_failure_is_counted_but_not_raised(
     # Must not propagate — a live session survives a graph outage.
     await service.ingest(
         _obs(
-            errors=[
-                {"type": "ser_estar", "produced_form": "es", "target_form": "está"}
-            ]
+            errors=[{"type": "ser_estar", "produced_form": "es", "target_form": "está"}]
         )
     )
     assert sink.graph_failed == 1

@@ -69,13 +69,16 @@ def test_extra_fields_rejected() -> None:
 
 
 def test_load_personas_reads_directory(tmp_path: Path) -> None:
-    (tmp_path / "p1.json").write_text(
-        json.dumps(_minimal_persona_payload(id="p1"))
-    )
+    (tmp_path / "p1.json").write_text(json.dumps(_minimal_persona_payload(id="p1")))
     (tmp_path / "p2.json").write_text(
-        json.dumps(_minimal_persona_payload(id="p2", cefr_band="A2",
-                                            scenario_domain="en el restaurante",
-                                            error_patterns=["gender_agreement"]))
+        json.dumps(
+            _minimal_persona_payload(
+                id="p2",
+                cefr_band="A2",
+                scenario_domain="en el restaurante",
+                error_patterns=["gender_agreement"],
+            )
+        )
     )
     personas = load_personas(tmp_path)
     assert [p.id for p in personas] == ["p1", "p2"]
