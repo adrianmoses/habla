@@ -13,7 +13,22 @@ VALID_PAYLOAD = {
         {"criterio": c, "puntuacion": 2, "justificacion": "ok"}
         for c in ("coherencia", "fluidez", "correccion", "alcance")
     ],
-    "errores": [],
+    "errores": [
+        {
+            "tipo": "calco",
+            "patron": "hacer sentido",
+            "deberia_ser": "tener sentido",
+            "por_que": "traducción literal de «make sense»",
+            "instancias": ["eso no hace sentido", "no hace sentido para mí"],
+        },
+        {
+            "tipo": "gramatica",
+            "patron": "por vs para",
+            "deberia_ser": "para",
+            "por_que": "finalidad, no causa",
+            "instancias": ["lo hice por comprar pan"],
+        },
+    ],
     "subjuntivo": [],
     "mejoras": [
         {"rodeo": "a", "chunk_b2": "b", "contexto": "c"},
@@ -38,6 +53,20 @@ def test_build_prompt_fills_all_placeholders() -> None:
     assert "a menos que" in prompt
     # Literal braces of the schema description must survive (no str.format).
     assert "{criterio, puntuacion, justificacion}" in prompt
+
+
+def test_prompt_asset_carries_v2_contract() -> None:
+    """PROMPT_VERSION and the prompt asset must not drift apart: the template
+    has to name the matching schema and state the calco labeling rules."""
+    template = examiner.load_prompt_template()
+    assert examiner.PROMPT_VERSION == "examiner_v2"
+    assert "output_schema_v2.json" in template
+    assert "{tipo, patron, deberia_ser, por_que, instancias}" in template
+    # calco wins ties, sorts first, and loanwords are explicitly out of scope.
+    assert "categoría prioritaria" in template
+    assert "No reportes préstamos del inglés" in template
+    for tipo in ("calco", "gramatica", "lexico", "registro"):
+        assert tipo in template
 
 
 def test_build_prompt_empty_optionals() -> None:
@@ -70,6 +99,53 @@ def test_run_examiner_parses_valid_response(mock_cls: MagicMock) -> None:
     result = examiner.run_examiner("prompt", _config())
     assert result.enfoque_proxima_sesion == "foco"
     assert client.messages.create.call_count == 1
+
+
+@patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"})
+@patch("anthropic.Anthropic")
+def test_run_examiner_groups_errors_by_pattern(mock_cls: MagicMock) -> None:
+    """Instances live inside a pattern row, and calcos are separable."""
+    client = mock_cls.return_value
+    client.messages.create.return_value = _response(json.dumps(VALID_PAYLOAD))
+    result = examiner.run_examiner("prompt", _config())
+    assert len(result.errores) == 2
+    assert [e.tipo for e in result.calcos] == ["calco"]
+    assert result.calcos[0].instancias == [
+        "eso no hace sentido",
+        "no hace sentido para mí",
+    ]
+    assert [e.patron for e in result.otros_errores] == ["por vs para"]
+
+
+@patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"})
+@patch("anthropic.Anthropic")
+def test_run_examiner_retries_on_unknown_tipo(mock_cls: MagicMock) -> None:
+    """An off-enum tipo (e.g. the dropped "anglicismo") must not slip through."""
+    bad = {**VALID_PAYLOAD, "errores": [{**VALID_PAYLOAD["errores"][0],
+                                         "tipo": "anglicismo"}]}
+    client = mock_cls.return_value
+    client.messages.create.side_effect = [
+        _response(json.dumps(bad)),
+        _response(json.dumps(VALID_PAYLOAD)),
+    ]
+    result = examiner.run_examiner("prompt", _config())
+    assert client.messages.create.call_count == 2
+    assert [e.tipo for e in result.errores] == ["calco", "gramatica"]
+
+
+@patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"})
+@patch("anthropic.Anthropic")
+def test_run_examiner_retries_on_empty_instancias(mock_cls: MagicMock) -> None:
+    """A pattern with no occurrence is meaningless — min_length=1 rejects it."""
+    bad = {**VALID_PAYLOAD, "errores": [{**VALID_PAYLOAD["errores"][0],
+                                         "instancias": []}]}
+    client = mock_cls.return_value
+    client.messages.create.side_effect = [
+        _response(json.dumps(bad)),
+        _response(json.dumps(VALID_PAYLOAD)),
+    ]
+    examiner.run_examiner("prompt", _config())
+    assert client.messages.create.call_count == 2
 
 
 @patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"})

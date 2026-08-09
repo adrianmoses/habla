@@ -66,6 +66,9 @@ def _stats_row(
         "errors_n": (
             len(examiner_result.errores) if examiner_result is not None else ""
         ),
+        "calcos_n": (
+            len(examiner_result.calcos) if examiner_result is not None else ""
+        ),
         "score_total": (
             sum(p.puntuacion for p in examiner_result.puntuaciones)
             if examiner_result is not None

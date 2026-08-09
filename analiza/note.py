@@ -8,10 +8,14 @@ from analiza.examiner import ExaminerResult
 
 # Column order is the CSV contract — append-only, never reordered.
 # The 90-day trend line: numbers only, never LLM prose.
+# `errors_n` counts error *patterns* from examiner_v2 on (it counted rows,
+# i.e. roughly occurrences, under v1) — filter on prompt_version before
+# trending it across the boundary.
 STATS_COLUMNS: list[str] = [
     "date", "ejercicio", "tema", "duration_s", "wpm_gross", "wpm_articulation",
     "pauses_n", "pause_max_s", "fillers_per_min", "connectors_unique",
-    "formal_ratio", "mtld", "errors_n", "score_total", "prompt_version",
+    "formal_ratio", "mtld", "errors_n", "calcos_n", "score_total",
+    "prompt_version",
 ]
 
 # Metric key → display label for the note's summary block.
@@ -36,6 +40,12 @@ _METRIC_LABELS: list[tuple[str, str]] = [
 
 class VaultWriteError(Exception):
     """Could not write into the vault (exit code 3)."""
+
+
+def _cell(text: str) -> str:
+    """Make LLM-supplied text safe for a markdown table cell: a literal pipe
+    or newline would otherwise split the row."""
+    return text.replace("|", "\\|").replace("\n", " ").strip()
 
 
 def render_note(
@@ -86,15 +96,32 @@ def render_note(
         total = sum(p.puntuacion for p in examiner.puntuaciones)
         lines += ["", f"**Total: {total}/12**", ""]
 
+        # Calques get their own section rather than a row in the errors table:
+        # they are the priority category, and burying them among grammar rows
+        # is what the v2 pattern grouping exists to avoid.
+        lines += ["## Calcos", ""]
+        if examiner.calcos:
+            for e in examiner.calcos:
+                lines.append(
+                    f"- **{e.patron}** → {e.deberia_ser} — {e.por_que} "
+                    f"({len(e.instancias)}×)"
+                )
+                lines += [f"    - “{i}”" for i in e.instancias]
+        else:
+            lines.append("_Ninguno visible en la transcripción._")
+        lines.append("")
+
         lines += ["## Errores", ""]
-        if examiner.errores:
+        if examiner.otros_errores:
             lines += [
-                "| dije | debería ser | por qué |",
-                "| --- | --- | --- |",
+                "| patrón | debería ser | por qué | tipo | instancias |",
+                "| --- | --- | --- | --- | --- |",
             ]
             lines += [
-                f"| {e.dije} | {e.deberia_ser} | {e.por_que} |"
-                for e in examiner.errores
+                f"| {_cell(e.patron)} | {_cell(e.deberia_ser)} | "
+                f"{_cell(e.por_que)} | {e.tipo} | "
+                f"{' · '.join(_cell(i) for i in e.instancias)} |"
+                for e in examiner.otros_errores
             ]
         else:
             lines.append("_Ninguno visible en la transcripción._")

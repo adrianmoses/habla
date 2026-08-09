@@ -76,20 +76,34 @@ All thresholds in config, defaults as above. Metrics output is a flat dict → J
 
 ### E. LLM examiner (skippable with `--no-llm`)
 - Input: full transcript, metrics dict, `tema`, `ejercicio`, low-confidence span hints.
-- Prompt contract (versioned string in `prompts/examiner_v1.md` — version recorded in output, since prompt changes break comparability of scores):
+- Prompt contract (versioned string in `prompts/{prompt_version}.md`, currently `examiner_v2.md` — version recorded in output, since prompt changes break comparability of scores; superseded versions are kept):
   - Role: acreditado DELE B2 oral examiner, peninsular Spanish.
   - Caveats given to model: transcript may have silently corrected learner errors; filler counts are underestimates; do not comment on pronunciation (not observable from text).
-  - Tasks: (1) score 1–3 per rubric criterion — coherencia, fluidez, corrección, alcance — with one-line justification; (2) error table rows `dije | debería ser | por qué` (only errors visible in transcript, max 10, most instructive first); (3) subjunctive check on any matched trigger connectors (`de ahí que`, `a menos que`, …) — correct/incorrect per instance; (4) 2–3 upgrade suggestions: phrases the speaker used a rodeo for, with the B2 chunk that replaces them; (5) one focus for next session.
-  - Output: strict JSON schema (versioned, `output_schema_v1.json`); parse with fallback → on schema violation, one retry with error appended, then mark feedback section as failed.
+  - Tasks: (1) score 1–3 per rubric criterion — coherencia, fluidez, corrección, alcance — with one-line justification; (2) errors grouped **by pattern**, `tipo | patrón | debería ser | por qué | instancias` (only errors visible in transcript, max 10 **patterns**, calques first then most instructive); (3) subjunctive check on any matched trigger connectors (`de ahí que`, `a menos que`, …) — correct/incorrect per instance; (4) 2–3 upgrade suggestions: phrases the speaker used a rodeo for, with the B2 chunk that replaces them; (5) one focus for next session.
+  - Output: strict JSON schema (versioned, `output_schema_v2.json`); parse with fallback → on schema violation, one retry with error appended, then mark feedback section as failed.
+
+#### Error grouping and `tipo` (examiner_v2)
+
+A repeated fault is **one row carrying every occurrence in `instancias`**, not one row per occurrence. The cap therefore budgets distinct faults to work on: six `por`/`para` slips take one slot instead of crowding out five other error types. `len(instancias)` becomes a severity signal the flat list threw away.
+
+`tipo` ∈ `calco` | `gramatica` | `lexico` | `registro`:
+
+- **`calco`** — structure or idiom translated literally from English; usually grammatical but unidiomatic (*hacer sentido*, *aplicar para un trabajo*, *estoy bueno*), including false friends used with the English sense (*realizar*, *soportar*, *eventualmente*). **Priority category**: an error matching `calco` and another type is tagged `calco`, and calques sort first.
+- **`gramatica`** — agreement, tense, mood, prepositional régimen.
+- **`lexico`** — wrong word with no identifiable English origin.
+- **`registro`** — wrong formality for the context.
+
+Loanwords (*email*, *random*, *software*) are deliberately **not** a category and are not reported: acceptance varies by region and register, so they are noise rather than learner error. A loanword only counts when it is part of a structural calque.
 
 ### F. Outputs
 
 1. **Session note** → `{vault}/Español/Sesiones/YYYY-MM-DD {ejercicio}.md`
    - Frontmatter per vault convention: `type: sesion`, `ejercicio`, `fecha`, `duracion` (minutes, from audio), `tema`, `fuente: analiza`.
-   - Body: metrics summary block, examiner scores, error table (pre-filled, vault table format), upgrade suggestions rendered as `frase :: contexto` bullets under "Chunks capturados" — so the weekly-review promotion flow applies unchanged.
+   - Body: metrics summary block, examiner scores, a "Calcos" section (calques listed with every instance quoted, so they are not buried among grammar rows), error table for the remaining types (pre-filled, vault table format), upgrade suggestions rendered as `frase :: contexto` bullets under "Chunks capturados" — so the weekly-review promotion flow applies unchanged.
    - Collision: if the file exists, append ` (2)`.
 2. **Stats row** → `{vault}/Español/analiza-stats.csv`
-   - `date, ejercicio, tema, duration_s, wpm_gross, wpm_articulation, pauses_n, pause_max_s, fillers_per_min, connectors_unique, formal_ratio, mtld, errors_n, score_total, prompt_version`
+   - `date, ejercicio, tema, duration_s, wpm_gross, wpm_articulation, pauses_n, pause_max_s, fillers_per_min, connectors_unique, formal_ratio, mtld, errors_n, calcos_n, score_total, prompt_version`
+   - `errors_n` and `calcos_n` count **patterns**, not occurrences, from `examiner_v2` on; under `v1` `errors_n` counted rows. Filter on `prompt_version` before trending across that boundary.
    - Append-only; this is the 90-day trend line. Never contains LLM prose, only numbers.
 3. **Raw artifacts** → `{vault}/Español/analiza-raw/YYYY-MM-DD-{ejercicio}/`: source audio copy (optional, config), whisper JSON, metrics JSON, LLM response JSON.
 
@@ -106,8 +120,8 @@ analiza/
   examiner.py       # prompt build, LLM call, schema validation, retry
   note.py           # obsidian note + csv rendering
   config.py
-  prompts/examiner_v1.md
-  schemas/output_schema_v1.json
+  prompts/examiner_v1.md, examiner_v2.md          # superseded versions kept
+  schemas/output_schema_v1.json, output_schema_v2.json
 ```
 
 `metrics.py` and `connectors.py` take plain data structures and return plain data structures — fully testable without audio. Test fixtures: 3–4 hand-annotated short recordings (one clean, one filler-heavy, one with long pauses, one mumbled) with expected metric ranges.
