@@ -3,8 +3,9 @@
 | Field | Value |
 |---|---|
 | id | 034 |
-| status | draft |
+| status | approved |
 | created | 2026-08-09 |
+| approved | 2026-08-09 |
 
 ---
 
@@ -140,28 +141,38 @@ meaningful history accumulates, because every session recorded without a
 
 ### Open Questions
 
-1. **Vocabulary size and authorship.** ~30–60 entries covering the recurring
-   B2-learner faults, hand-curated like `conectores_b2.py`? Or seeded by
-   clustering the stored `examiner.json` corpus first? *Proposed: seed from the
-   corpus, then hand-edit — the corpus is small and already on disk, and a
-   from-scratch list will miss this learner's actual faults.*
-2. **Resolved threshold.** How many consecutive absent sessions before a pattern
-   is "resolved"? *Proposed: configurable, default 3, and reported as "absent
-   for N sessions" rather than as a verdict.*
-3. **Minimum session count for a narrative.** *Proposed: 8, configurable. Below
-   that, metric noise plausibly exceeds real change at 2–3 sessions/week.*
-4. **Window shape for metric trends.** First third vs last third, or fixed
-   first-N vs last-N? *Proposed: fixed N=5 with an explicit "insufficient
-   sessions" state, so the comparison doesn't silently change meaning as
-   history grows.*
-5. **Should `pattern_id` also feed the CSV?** A per-session `patterns` column
-   would make recurrence computable from the CSV alone, without opening every
-   `examiner.json`. *Proposed: no — it would put a variable-length list in a
-   columnar contract the spec describes as "numbers only". Deferred.*
-6. **Does the vocabulary change require `examiner_v3`?** Adding a required field
-   changes the output contract, so yes by the existing convention. Confirm the
-   version bump is acceptable given `prompt_version` gates score comparability
-   and v2 has one recorded session.
+All resolved at approval (2026-08-09) toward the drafted proposals, except
+where noted as deferred with a reason.
+
+1. **Vocabulary size and authorship** — *resolved.* Seed by clustering the
+   stored `examiner.json` corpus, then hand-edit to ~30–60 entries. A
+   from-scratch list drafted against the DELE B2 rubric would miss this
+   learner's actual faults; the corpus is small and already on disk. The
+   hand-edit pass is not optional — clustering output is a starting point, and
+   Key Decision 1 puts the granularity judgment in this file deliberately.
+2. **Resolved threshold** — *resolved.* Configurable, default 3 consecutive
+   absent sessions, and rendered as "absent for N sessions" rather than as a
+   verdict. The report states the observation; calling a fault fixed is the
+   learner's call.
+3. **Minimum session count for a narrative** — *resolved* at 8, configurable.
+   *Calibration explicitly deferred* until ≥10 sessions exist: at 2–3 sessions
+   a week the number is a guess, and tuning it against a corpus of one would
+   dress that guess as evidence.
+4. **Window shape for metric trends** — *resolved.* Fixed first-N vs last-N with
+   N=5, plus an explicit "insufficient sessions" state. Rejected first-third vs
+   last-third because the comparison would silently change meaning as history
+   grows, so two reports a month apart would not be comparing like with like.
+5. **Should `pattern_id` also feed the CSV?** — *deferred*, with the reason
+   standing: a variable-length list does not belong in a columnar contract the
+   `analiza` spec describes as "numbers only, never LLM prose". Recurrence is
+   computed from the `examiner.json` corpus, which is the durable artifact for
+   exactly this kind of reprocessing (`analiza` spec §2C). Revisit only if
+   opening every file per report becomes a real cost.
+6. **Does the vocabulary change require `examiner_v3`?** — *resolved: yes.*
+   Adding a required field changes the output contract, and the convention is
+   one prompt version per contract. The comparability cost is one recorded v2
+   session, which is the cheapest this bump will ever be — a further argument
+   for sequencing WS1 first.
 
 ---
 
