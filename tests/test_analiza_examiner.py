@@ -1,5 +1,8 @@
 """Examiner tests (spec §2E): prompt build, structured outputs, one retry."""
 
+import importlib.resources
+import json
+from typing import get_args
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -8,6 +11,7 @@ from pydantic import ValidationError
 from analiza import examiner
 from analiza.config import Config
 from analiza.examiner import ExaminerResult
+from analiza.patrones_b2 import PATRON_IDS, PATRONES, PATRONES_POR_ID, PatternId
 
 VALID_PAYLOAD = {
     "puntuaciones": [
@@ -16,6 +20,7 @@ VALID_PAYLOAD = {
     ],
     "errores": [
         {
+            "pattern_id": "calco-hacer-sentido",
             "tipo": "calco",
             "patron": "hacer sentido",
             "deberia_ser": "tener sentido",
@@ -23,6 +28,7 @@ VALID_PAYLOAD = {
             "instancias": ["eso no hace sentido", "no hace sentido para mí"],
         },
         {
+            "pattern_id": "por-vs-para",
             "tipo": "gramatica",
             "patron": "por vs para",
             "deberia_ser": "para",
@@ -56,18 +62,33 @@ def test_build_prompt_fills_all_placeholders() -> None:
     assert "{criterio, puntuacion, justificacion}" in prompt
 
 
-def test_prompt_asset_carries_v2_contract() -> None:
+def test_prompt_asset_carries_v3_contract() -> None:
     """PROMPT_VERSION and the prompt asset must not drift apart: the template
-    has to name the matching schema and state the calco labeling rules."""
+    has to name the matching schema and state the labeling rules."""
     template = examiner.load_prompt_template()
-    assert examiner.PROMPT_VERSION == "examiner_v2"
-    assert "output_schema_v2.json" in template
-    assert "{tipo, patron, deberia_ser, por_que, instancias}" in template
+    assert examiner.PROMPT_VERSION == "examiner_v3"
+    assert "output_schema_v3.json" in template
+    assert "{pattern_id, tipo, patron, deberia_ser, por_que, instancias}" in template
     # calco wins ties, sorts first, and loanwords are explicitly out of scope.
     assert "categoría prioritaria" in template
     assert "No reportes préstamos del inglés" in template
     for tipo in ("calco", "gramatica", "lexico", "registro"):
         assert tipo in template
+
+
+def test_prompt_carries_the_whole_vocabulary() -> None:
+    """The model can only pick an id it was shown. Rendering from patrones_b2
+    (rather than copying the list into the asset) is what keeps the enum the
+    API enforces and the list the model reads from drifting apart."""
+    prompt = examiner.build_prompt(
+        transcript="hola", metrics={}, tema=None, ejercicio="monologo",
+        low_conf_hints=[], subjunctive_connectors=[],
+    )
+    assert "{vocabulario}" not in prompt
+    for patron in PATRONES:
+        assert f"`{patron.id}`" in prompt, f"{patron.id} never reaches the model"
+    # `otro` has no Patron entry, so the asset must introduce it itself.
+    assert "`otro`" in prompt
 
 
 def test_build_prompt_empty_optionals() -> None:
@@ -164,6 +185,67 @@ def test_run_examiner_retries_once_then_succeeds(mock_cls: MagicMock) -> None:
         "content"
     ]
     assert "no cumplió el esquema" in retry_prompt
+
+
+def test_vocabulary_and_literal_agree() -> None:
+    """PATRONES describes every id except `otro`, with no duplicates. mypy
+    catches a typo'd id in PATRONES; this catches the other direction — an id
+    added to the Literal and never described, which the model could then be
+    asked to emit with no idea what it means."""
+    literal_ids = set(get_args(PatternId))
+    described = [p.id for p in PATRONES]
+    assert len(described) == len(set(described)), "duplicate id in PATRONES"
+    assert literal_ids - set(described) == {"otro"}
+    assert set(described) - literal_ids == set()
+
+
+def test_every_patron_is_well_formed() -> None:
+    """`ejemplos` must be a non-empty tuple of strings. A single-element entry
+    written `("...")` instead of `("...",)` is a string, and would render into
+    the prompt one character at a time — mypy catches it, but CI's mypy scope
+    does not cover analiza/, so this is the guard that actually runs."""
+    for p in PATRONES:
+        assert isinstance(p.ejemplos, tuple), f"{p.id}: ejemplos is not a tuple"
+        assert p.ejemplos, f"{p.id}: no ejemplos to anchor the choice"
+        assert all(isinstance(e, str) and e for e in p.ejemplos), f"{p.id}: bad ejemplo"
+        assert p.etiqueta.strip(), f"{p.id}: empty etiqueta"
+
+
+def test_escape_hatch_is_excluded_from_tracking() -> None:
+    """`otro` is a bucket, not a pattern. Letting it into PATRON_IDS would make
+    every unclassifiable finding look like one recurring fault."""
+    assert "otro" not in PATRON_IDS
+    assert "otro" not in PATRONES_POR_ID
+
+
+def test_pattern_id_is_required_and_enum_constrained() -> None:
+    row = {
+        "tipo": "gramatica", "patron": "x", "deberia_ser": "y",
+        "por_que": "z", "instancias": ["w"],
+    }
+    with pytest.raises(ValidationError):  # missing
+        examiner.ErrorRow.model_validate(row)
+    with pytest.raises(ValidationError):  # off-vocabulary
+        examiner.ErrorRow.model_validate({**row, "pattern_id": "inventado"})
+    assert examiner.ErrorRow.model_validate(
+        {**row, "pattern_id": "por-vs-para"}
+    ).pattern_id == "por-vs-para"
+
+
+def test_documented_schema_has_not_drifted_from_the_vocabulary() -> None:
+    """output_schema_v3.json is documentation — structured outputs send the
+    pydantic-derived schema, not this file — but the prompt names it, so a
+    stale enum here is a contradictory instruction to the model."""
+    doc = json.loads(
+        (
+            importlib.resources.files("analiza")
+            / "schemas"
+            / "output_schema_v3.json"
+        ).read_text()
+    )
+    props = doc["properties"]["errores"]["items"]
+    assert set(props["properties"]["pattern_id"]["enum"]) == set(get_args(PatternId))
+    assert "pattern_id" in props["required"]
 
 
 def test_unenforced_constraints_become_description_hints() -> None:

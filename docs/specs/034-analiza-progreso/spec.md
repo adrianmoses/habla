@@ -276,11 +276,31 @@ until there is history.
 
 **Validate before proceeding:**
 
-1. **Vocabulary stability spike.** With a draft vocabulary, run the v3 examiner
-   3× over the one stored transcript and measure `pattern_id` agreement across
-   runs. This is the direct repeat of the experiment that motivated the spec,
-   and the pass condition for WS1. If agreement is poor, the vocabulary is at
-   the wrong granularity — fix that before building WS2/WS3 on top.
+1. ~~**Vocabulary stability spike.**~~ **Run 2026-08-09 — passed.** 51 patterns
+   + `otro`, three v3 runs over the stored 595s transcript:
+
+   - **8 of 12 ids in all three runs** (Jaccard 0.67), against a v2 baseline
+     that shared essentially nothing by string.
+   - **Zero `otro`** — the vocabulary covers this learner's faults, so
+     granularity is not so fine that findings fall off the list.
+   - **Zero ids whose `tipo` moved between runs.** This is the design working:
+     pinning the id made `tipo` follow it instead of floating, which is
+     precisely the instability §Why documents.
+
+   **The residual variance is the 10-pattern cap, not the vocabulary.** All
+   three runs returned exactly 10 — the cap is binding every time — while ~12
+   real faults compete for the slots, so the four rotating ids
+   (`calco-estructura-enfatica`, `subjuntivo-tras-deseo`,
+   `conector-ausente-o-repetido`, `confusion-pares-minimos`) are rank-boundary
+   items, not mis-keyed ones.
+
+   **Consequence for WS2, which this spec did not anticipate:** absence from a
+   session is ambiguous — the fault may not have occurred, or may have ranked
+   11th. So a "resolved" classification cannot be read off absence alone while
+   the cap binds. OQ2's proposed rendering ("absent for N sessions" rather than
+   a verdict) turns out to be load-bearing rather than stylistic, and WS2
+   should additionally record whether each session hit the cap, so a run at
+   10/10 can be treated as truncated rather than complete.
 2. **Backfill dry run** over the stored corpus, hand-checked, to confirm ids are
    assigned sensibly and `otro` is not a dumping ground.
 3. **Threshold calibration** deferred until ≥10 sessions exist. Ship the gates

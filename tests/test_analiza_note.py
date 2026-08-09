@@ -34,6 +34,7 @@ def examiner_result() -> ExaminerResult:
         ],
         errores=[
             ErrorRow(
+                pattern_id="calco-hacer-sentido",
                 tipo="calco",
                 patron="hacer sentido",
                 deberia_ser="tener sentido",
@@ -41,6 +42,7 @@ def examiner_result() -> ExaminerResult:
                 instancias=["eso no hace sentido", "no hace sentido para mí"],
             ),
             ErrorRow(
+                pattern_id="preposicion-lugar",
                 tipo="gramatica",
                 patron="régimen preposicional con verbos de movimiento",
                 deberia_ser="fui a casa",
@@ -101,6 +103,7 @@ def test_render_note_escapes_pipes_in_error_table() -> None:
     result = examiner_result()
     result.errores = [
         ErrorRow(
+            pattern_id="palabra-imprecisa",
             tipo="lexico", patron="a | b", deberia_ser="c", por_que="d\ne",
             instancias=["f | g"],
         )

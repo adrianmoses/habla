@@ -16,8 +16,9 @@ from typing import Literal
 from pydantic import BaseModel, Field, ValidationError
 
 from analiza.config import Config
+from analiza.patrones_b2 import PATRONES, PatternId, Tipo
 
-PROMPT_VERSION = "examiner_v2"
+PROMPT_VERSION = "examiner_v3"
 
 # max_tokens caps thinking AND response text together, and the examiner models
 # think by default. At 4096 a 10-minute monólogo spent the entire budget
@@ -29,11 +30,9 @@ MAX_TOKENS = 16000
 
 Criterio = Literal["coherencia", "fluidez", "correccion", "alcance"]
 
-# Error taxonomy. "calco" is the priority category — a structure translated
-# literally from English, often grammatical but unidiomatic. Loanwords
-# ("email", "random") are deliberately NOT a category: acceptance varies by
-# region and register, so flagging them is noise rather than a learner error.
-Tipo = Literal["calco", "gramatica", "lexico", "registro"]
+# Tipo and PatternId live in patrones_b2 (the vocabulary owns the taxonomy) and
+# are re-exported here so the output schema reads in one place.
+__all__ = ["ExaminerResult", "PatternId", "Tipo", "run_examiner"]
 
 
 class Puntuacion(BaseModel):
@@ -51,8 +50,13 @@ class ErrorRow(BaseModel):
     out five other error types.
     """
 
+    # The tracking key across sessions (spec 034). Enum-enforced by structured
+    # outputs. `tipo` is deliberately NOT the key: the same fault has been
+    # observed switching between `calco` and `gramatica` across two runs over
+    # one transcript, so it is a per-session label only.
+    pattern_id: PatternId
     tipo: Tipo
-    patron: str  # names the fault, e.g. "por vs para — causa frente a finalidad"
+    patron: str  # human-readable label; the only carrier of meaning when `otro`
     deberia_ser: str
     por_que: str
     # Every occurrence, verbatim from the transcript. Uncapped: len() is the
@@ -102,6 +106,17 @@ def load_prompt_template() -> str:
     ).read_text()
 
 
+def render_vocabulario() -> str:
+    """The pattern vocabulary as the model sees it: id, label, wrong-form
+    examples. Rendered from patrones_b2 rather than duplicated in the prompt
+    asset, so the enum the API enforces and the list the model reads cannot
+    drift apart."""
+    return "\n".join(
+        f"- `{p.id}` — {p.etiqueta}. P. ej.: {'; '.join(p.ejemplos)}"
+        for p in PATRONES
+    )
+
+
 def build_prompt(
     transcript: str,
     metrics: dict[str, float | int],
@@ -125,6 +140,7 @@ def build_prompt(
     )
     prompt = load_prompt_template()
     for placeholder, value in [
+        ("{vocabulario}", render_vocabulario()),
         ("{ejercicio}", ejercicio),
         ("{tema}", tema or "(sin tema)"),
         ("{metrics_json}", json.dumps(metrics, ensure_ascii=False)),

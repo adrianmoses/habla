@@ -1,0 +1,205 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "analiza/output_schema_v3.json",
+  "title": "analiza examiner output v3",
+  "_comment": "Documentation of the contract. analiza.examiner.ExaminerResult is the executable source of truth — structured outputs send the schema derived from it, not this file. The pattern_id enum is generated from analiza.patrones_b2.PatternId; tests/test_analiza_examiner.py asserts this file has not drifted from it.",
+  "type": "object",
+  "required": [
+    "puntuaciones",
+    "errores",
+    "subjuntivo",
+    "mejoras",
+    "enfoque_proxima_sesion"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "puntuaciones": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": {
+        "type": "object",
+        "required": [
+          "criterio",
+          "puntuacion",
+          "justificacion"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "criterio": {
+            "enum": [
+              "coherencia",
+              "fluidez",
+              "correccion",
+              "alcance"
+            ]
+          },
+          "puntuacion": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3
+          },
+          "justificacion": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "errores": {
+      "description": "Error patterns, not occurrences: maxItems budgets distinct faults to work on. Repeated instances of one fault live in `instancias`. `pattern_id` is the stable key a fault is tracked on across sessions; `tipo` is a per-session label and is deliberately not the key.",
+      "type": "array",
+      "maxItems": 10,
+      "items": {
+        "type": "object",
+        "required": [
+          "pattern_id",
+          "tipo",
+          "patron",
+          "deberia_ser",
+          "por_que",
+          "instancias"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "pattern_id": {
+            "enum": [
+              "subjuntivo-tras-deseo",
+              "subjuntivo-tras-emocion-duda",
+              "subjuntivo-tras-conector-final",
+              "subjuntivo-tras-conector-condicional",
+              "subjuntivo-tras-conector-temporal",
+              "subjuntivo-tras-conector-concesivo",
+              "subjuntivo-en-relativa-indefinida",
+              "indicativo-tras-si-real",
+              "condicional-irreal-presente",
+              "condicional-irreal-pasado",
+              "preterito-vs-imperfecto",
+              "perfecto-vs-indefinido",
+              "pluscuamperfecto-uso",
+              "futuro-vs-perifrasis",
+              "gerundio-sobreusado",
+              "infinitivo-vs-subjuntivo-mismo-sujeto",
+              "conjugacion-irregular",
+              "concordancia-genero",
+              "concordancia-numero",
+              "concordancia-sujeto-verbo",
+              "genero-sustantivo-irregular",
+              "por-vs-para",
+              "regimen-verbo-preposicion",
+              "verbo-sin-preposicion",
+              "preposicion-lugar",
+              "a-personal",
+              "preposicion-tiempo",
+              "pronombre-objeto-directo-indirecto",
+              "se-impersonal-vs-pasiva",
+              "pronombre-sujeto-redundante",
+              "verbos-tipo-gustar",
+              "ser-vs-estar",
+              "haber-vs-estar",
+              "tener-vs-estar-expresiones",
+              "calco-hacer-sentido",
+              "calco-aplicar-para",
+              "calco-estoy-bueno",
+              "calco-en-orden-de",
+              "calco-la-razon-es-porque",
+              "calco-seguir-con-gerundio",
+              "calco-verbo-mas-preposicion-inglesa",
+              "calco-estructura-enfatica",
+              "falso-amigo-realizar",
+              "falso-amigo-soportar-atender",
+              "falso-amigo-eventualmente-actualmente",
+              "palabra-imprecisa",
+              "confusion-pares-minimos",
+              "coloquial-por-formal",
+              "muletillas-excesivas",
+              "autocorreccion-excesiva",
+              "conector-ausente-o-repetido",
+              "otro"
+            ]
+          },
+          "tipo": {
+            "enum": [
+              "calco",
+              "gramatica",
+              "lexico",
+              "registro"
+            ]
+          },
+          "patron": {
+            "type": "string"
+          },
+          "deberia_ser": {
+            "type": "string"
+          },
+          "por_que": {
+            "type": "string"
+          },
+          "instancias": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "subjuntivo": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "conector",
+          "frase",
+          "correcto"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "conector": {
+            "type": "string"
+          },
+          "frase": {
+            "type": "string"
+          },
+          "correcto": {
+            "type": "boolean"
+          },
+          "comentario": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "mejoras": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "required": [
+          "rodeo",
+          "chunk_b2",
+          "contexto"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "rodeo": {
+            "type": "string"
+          },
+          "chunk_b2": {
+            "type": "string"
+          },
+          "contexto": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "enfoque_proxima_sesion": {
+      "type": "string"
+    }
+  }
+}
