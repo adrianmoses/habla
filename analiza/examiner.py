@@ -1,4 +1,7 @@
-"""LLM examiner (spec §2E): prompt build, call, schema validation, one retry.
+"""LLM examiner (spec §2E): prompt build, structured-output call, one retry.
+
+The response shape is enforced by the API (structured outputs against the
+ExaminerResult schema), so this module no longer parses JSON out of prose.
 
 Prompt contract is a versioned asset (prompts/{PROMPT_VERSION}.md); the version
 is recorded in every output because prompt changes break score comparability.
@@ -8,7 +11,6 @@ Old versions are kept alongside the current one so past outputs stay readable.
 import importlib.resources
 import json
 import os
-import re
 from typing import Literal
 
 from pydantic import BaseModel, Field, ValidationError
@@ -16,6 +18,14 @@ from pydantic import BaseModel, Field, ValidationError
 from analiza.config import Config
 
 PROMPT_VERSION = "examiner_v2"
+
+# max_tokens caps thinking AND response text together, and the examiner models
+# think by default. At 4096 a 10-minute monólogo spent the entire budget
+# thinking and returned zero text blocks — which surfaced as "invalid JSON"
+# twice and lost the whole feedback section. Sized for a long think plus the
+# full JSON payload; budget_tokens can't bound the two separately (removed on
+# current models).
+MAX_TOKENS = 16000
 
 Criterio = Literal["coherencia", "fluidez", "correccion", "alcance"]
 
@@ -126,17 +136,19 @@ def build_prompt(
     return prompt
 
 
-def _extract_json(text: str) -> str:
-    """Tolerate a fenced code block around the JSON, nothing more."""
-    fenced = re.search(r"```(?:json)?\s*(.*?)```", text, re.DOTALL)
-    return fenced.group(1).strip() if fenced else text.strip()
-
-
 def run_examiner(prompt: str, config: Config) -> ExaminerResult:
-    """Call the examiner model and validate against ExaminerResult.
+    """Call the examiner model with structured outputs and return the result.
 
-    On a schema violation: one retry with the validation error appended to the
-    prompt; on second failure raise ExaminerError.
+    `messages.parse` constrains generation to the ExaminerResult schema, so the
+    *shape* — field names, types, the `tipo` enum, required keys — can no
+    longer come back wrong, and neither can prose or a markdown fence wrapped
+    around the JSON.
+
+    What the API does not enforce is the count and range constraints
+    (max 10 patterns, scores 1–3, 2–3 mejoras): structured outputs reject
+    those, so the SDK moves each into its field's `description` — the model
+    still reads them, but only pydantic enforces them, on parse, as a
+    ValidationError. That is the one failure the retry below exists for.
     """
     import anthropic
 
@@ -149,23 +161,32 @@ def run_examiner(prompt: str, config: Config) -> ExaminerResult:
     last_error = ""
     for _ in range(2):
         try:
-            response = client.messages.create(
+            response = client.messages.parse(
                 model=config.llm_model,
-                max_tokens=4096,
+                max_tokens=MAX_TOKENS,
+                output_format=ExaminerResult,
                 messages=[{"role": "user", "content": attempt_prompt}],
             )
         except anthropic.AnthropicError as e:
             raise ExaminerError(f"LLM call failed: {e}") from e
-        text = "".join(
-            block.text for block in response.content if block.type == "text"
-        )
-        try:
-            return ExaminerResult.model_validate_json(_extract_json(text))
-        except (ValidationError, ValueError) as e:
+        except ValidationError as e:
+            # A count/range violation, or a payload truncated mid-JSON.
             last_error = str(e)
             attempt_prompt = (
                 f"{prompt}\n\nTu respuesta anterior no cumplió el esquema. "
                 f"Error de validación:\n{last_error}\n"
                 "Responde de nuevo únicamente con el JSON corregido."
             )
-    raise ExaminerError(f"schema validation failed after retry: {last_error}")
+            continue
+        # None means no text block at all — the model spent the whole budget
+        # thinking. Retrying hits the same wall, so fail with the diagnosis.
+        if response.parsed_output is None:
+            raise ExaminerError(
+                f"model returned no text block (stop_reason={response.stop_reason}); "
+                f"raise MAX_TOKENS if this is 'max_tokens'"
+            )
+        return response.parsed_output
+    raise ExaminerError(
+        f"schema validation failed after retry (raise MAX_TOKENS if the JSON "
+        f"was truncated): {last_error}"
+    )

@@ -1,10 +1,24 @@
-"""Outputs (spec §2F): Obsidian session note, append-only stats CSV, raw artifacts."""
+"""Outputs (spec §2F): session note, append-only stats CSV, raw artifacts.
+
+Writing into an Obsidian vault is one *layout*, not a requirement: with no
+vault configured, analiza writes the same three artifacts flat under a plain
+output directory. Only `output_base` knows the difference — everything below
+it takes an already-resolved base directory and is layout-agnostic.
+"""
 
 import csv
 import datetime as dt
 from pathlib import Path
 
 from analiza.examiner import ExaminerResult
+
+# Used when neither a vault nor an output dir is configured. Relative, so it
+# lands beside the invocation; .gitignore covers it at the repo root.
+DEFAULT_OUTPUT_DIR = Path("analiza-out")
+
+# Vault layout nests everything under this to match the Obsidian convention
+# (the vault holds more than Spanish practice). A plain output dir does not.
+VAULT_SUBDIR = "Español"
 
 # Column order is the CSV contract — append-only, never reordered.
 # The 90-day trend line: numbers only, never LLM prose.
@@ -43,8 +57,8 @@ _METRIC_LABELS: list[tuple[str, str]] = [
 ]
 
 
-class VaultWriteError(Exception):
-    """Could not write into the vault (exit code 3)."""
+class OutputWriteError(Exception):
+    """Could not write to the output directory, vault or not (exit code 3)."""
 
 
 def _cell(text: str) -> str:
@@ -157,15 +171,24 @@ def render_note(
     return "\n".join(lines)
 
 
-def note_path(vault: Path, fecha: dt.date, ejercicio: str) -> Path:
-    """{vault}/Español/Sesiones/YYYY-MM-DD {ejercicio}.md, appending " (2)",
-    " (3)", … on collision."""
-    sesiones = vault / "Español" / "Sesiones"
-    base = f"{fecha.isoformat()} {ejercicio}"
-    path = sesiones / f"{base}.md"
+def output_base(root: Path, *, vault_layout: bool) -> Path:
+    """The directory the three artifacts hang off.
+
+    The single place that knows about vault layout: `{root}/Español` for a
+    vault, `{root}` for a plain output dir.
+    """
+    return root / VAULT_SUBDIR if vault_layout else root
+
+
+def note_path(base: Path, fecha: dt.date, ejercicio: str) -> Path:
+    """{base}/Sesiones/YYYY-MM-DD {ejercicio}.md, appending " (2)", " (3)", …
+    on collision."""
+    sesiones = base / "Sesiones"
+    stem = f"{fecha.isoformat()} {ejercicio}"
+    path = sesiones / f"{stem}.md"
     n = 2
     while path.exists():
-        path = sesiones / f"{base} ({n}).md"
+        path = sesiones / f"{stem} ({n}).md"
         n += 1
     return path
 
@@ -175,18 +198,18 @@ def write_note(path: Path, content: str) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content)
     except OSError as e:
-        raise VaultWriteError(f"failed writing {path}: {e}") from e
+        raise OutputWriteError(f"failed writing {path}: {e}") from e
 
 
-def append_stats_row(vault: Path, row: dict[str, object]) -> None:
-    """Append to {vault}/Español/analiza-stats.csv, writing the header when
-    the file is created. Keys must match STATS_COLUMNS.
+def append_stats_row(base: Path, row: dict[str, object]) -> None:
+    """Append to {base}/analiza-stats.csv, writing the header when the file is
+    created. Keys must match STATS_COLUMNS.
     """
     if set(row) != set(STATS_COLUMNS):
         raise ValueError(
             f"stats row keys {sorted(row)} != contract {sorted(STATS_COLUMNS)}"
         )
-    csv_path = vault / "Español" / "analiza-stats.csv"
+    csv_path = base / "analiza-stats.csv"
     try:
         csv_path.parent.mkdir(parents=True, exist_ok=True)
         is_new = not csv_path.exists()
@@ -196,15 +219,15 @@ def append_stats_row(vault: Path, row: dict[str, object]) -> None:
                 writer.writeheader()
             writer.writerow(row)
     except OSError as e:
-        raise VaultWriteError(f"failed appending to {csv_path}: {e}") from e
+        raise OutputWriteError(f"failed appending to {csv_path}: {e}") from e
 
 
-def raw_dir(vault: Path, fecha: dt.date, ejercicio: str) -> Path:
-    """{vault}/Español/analiza-raw/YYYY-MM-DD-{ejercicio}/ — holds whisper
-    JSON, metrics JSON, LLM response JSON, optional source-audio copy."""
-    path = vault / "Español" / "analiza-raw" / f"{fecha.isoformat()}-{ejercicio}"
+def raw_dir(base: Path, fecha: dt.date, ejercicio: str) -> Path:
+    """{base}/analiza-raw/YYYY-MM-DD-{ejercicio}/ — holds whisper JSON,
+    metrics JSON, LLM response JSON, optional source-audio copy."""
+    path = base / "analiza-raw" / f"{fecha.isoformat()}-{ejercicio}"
     try:
         path.mkdir(parents=True, exist_ok=True)
     except OSError as e:
-        raise VaultWriteError(f"failed creating {path}: {e}") from e
+        raise OutputWriteError(f"failed creating {path}: {e}") from e
     return path

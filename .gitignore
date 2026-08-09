@@ -257,8 +257,15 @@ runtime_turns.jsonl
 
 # Local test audio (scripts/make_test_wav.py output, voice_client.py in/out)
 *.wav
+# Practice recordings dropped in for analiza. Already-tracked fixtures
+# (tests/fixtures/analiza/*.m4a) are unaffected — gitignore only hides
+# untracked files.
+*.m4a
 
 
 # Local DB backups (scripts/backup_db.sh)
 backups/
 tests/e2e/screenshots/
+
+# analiza default output dir (--out / --vault redirect it elsewhere)
+/analiza-out/

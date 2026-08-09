@@ -1,6 +1,6 @@
 # analiza — spec v0.1
 
-CLI that turns a recorded Spanish monólogo/narración into (1) deterministic fluency metrics, (2) LLM examiner feedback against the DELE B2 oral rubric, and (3) a ready-to-file Obsidian session note plus a row in a long-term stats file.
+CLI that turns a recorded Spanish monólogo/narración into (1) deterministic fluency metrics, (2) LLM examiner feedback against the DELE B2 oral rubric, and (3) a session note plus a row in a long-term stats file. The note is Obsidian-shaped and files straight into a vault when one is configured, but a vault is not required — see "Output destination" below.
 
 Design principle: **deterministic layer for trends, LLM layer for judgment.** Metrics must be reproducible across 90 days regardless of prompt or model changes; anything requiring interpretation (grammar, coherence, scoring) lives in the LLM layer and is clearly labeled as such.
 
@@ -17,7 +17,8 @@ Arguments:
 Options:
   --ejercicio TEXT         monologo | narrar-dia          [default: monologo]
   --tema TEXT              topic, goes into note frontmatter
-  --vault PATH             vault root                     [default: from config]
+  --out PATH               plain output dir               [default: ./analiza-out]
+  --vault PATH             Obsidian vault root; uses the nested vault layout
   --no-llm                 metrics only, skip examiner pass
   --model TEXT             whisper model                  [default: small]
   --llm TEXT               examiner model id              [default: from config]
@@ -25,11 +26,13 @@ Options:
   --lang TEXT              force language                 [default: es]
 
 Config: ~/.config/analiza/config.toml
-  vault_path, whisper_model, llm_provider/model/key env var name,
+  vault_path, output_dir, whisper_model, llm_provider/model/key env var name,
   connector list path, thresholds (overridable per run)
 ```
 
-Exit codes: 0 ok · 1 transcription failed · 2 audio unreadable · 3 vault write failed · 4 LLM failed (note still written, feedback section marked pending).
+Exit codes: 0 ok · 1 transcription failed · 2 audio unreadable · 3 output write failed · 4 LLM failed (note still written, feedback section marked pending).
+
+**Output destination.** The Obsidian vault is one *layout*, not a prerequisite — analiza runs with nothing configured. Precedence: `--vault` > config `vault_path` > `--out` > config `output_dir` > `./analiza-out`. A vault from either source also selects the nested `Español/` layout; every other destination is flat. Only `note.output_base` knows the difference, so the writers below it are layout-agnostic.
 
 ## 2. Pipeline
 
@@ -80,7 +83,9 @@ All thresholds in config, defaults as above. Metrics output is a flat dict → J
   - Role: acreditado DELE B2 oral examiner, peninsular Spanish.
   - Caveats given to model: transcript may have silently corrected learner errors; filler counts are underestimates; do not comment on pronunciation (not observable from text).
   - Tasks: (1) score 1–3 per rubric criterion — coherencia, fluidez, corrección, alcance — with one-line justification; (2) errors grouped **by pattern**, `tipo | patrón | debería ser | por qué | instancias` (only errors visible in transcript, max 10 **patterns**, calques first then most instructive); (3) subjunctive check on any matched trigger connectors (`de ahí que`, `a menos que`, …) — correct/incorrect per instance; (4) 2–3 upgrade suggestions: phrases the speaker used a rodeo for, with the B2 chunk that replaces them; (5) one focus for next session.
-  - Output: strict JSON schema (versioned, `output_schema_v2.json`); parse with fallback → on schema violation, one retry with error appended, then mark feedback section as failed.
+  - Output: **structured outputs** — the request carries the `ExaminerResult` schema, so the API constrains generation and the response *shape* (field names, types, the `tipo` enum, required keys) cannot come back wrong. No JSON is parsed out of prose.
+  - The API rejects count and range constraints, so the SDK folds them into each field's `description`: max 10 patterns, scores 1–3, and 2–3 mejoras are hints the model reads but only pydantic enforces, client-side. A violation there is the one case the single retry exists for; after it, the feedback section is marked failed.
+  - `output_schema_v2.json` is documentation of the contract; `examiner.ExaminerResult` is the executable source of truth.
 
 #### Error grouping and `tipo` (examiner_v2)
 
@@ -97,16 +102,18 @@ Loanwords (*email*, *random*, *software*) are deliberately **not** a category an
 
 ### F. Outputs
 
-1. **Session note** → `{vault}/Español/Sesiones/YYYY-MM-DD {ejercicio}.md`
+Paths below are shown relative to the resolved base (`{vault}/Español` for a vault, `{out}` otherwise).
+
+1. **Session note** → `{base}/Sesiones/YYYY-MM-DD {ejercicio}.md`
    - Frontmatter per vault convention: `type: sesion`, `ejercicio`, `fecha`, `duracion` (minutes, from audio), `tema`, `fuente: analiza`.
    - Body: metrics summary block, examiner scores, a "Calcos" section (calques listed with every instance quoted, so they are not buried among grammar rows), error table for the remaining types (pre-filled, vault table format), upgrade suggestions rendered as `frase :: contexto` bullets under "Chunks capturados" — so the weekly-review promotion flow applies unchanged.
    - Collision: if the file exists, append ` (2)`.
-2. **Stats row** → `{vault}/Español/analiza-stats.csv`
+2. **Stats row** → `{base}/analiza-stats.csv`
    - `date, ejercicio, tema, duration_s, wpm_gross, wpm_articulation, pauses_n, pause_max_s, fillers_per_min, connectors_unique, formal_ratio, mtld, errors_n, calcos_n, score_total, whisper_model, prompt_version`
    - `errors_n` and `calcos_n` count **patterns**, not occurrences, from `examiner_v2` on; under `v1` `errors_n` counted rows. Filter on `prompt_version` before trending across that boundary.
    - `whisper_model` and `prompt_version` are the provenance pair. Metrics derived from word probabilities (`fillers_n`, `low_conf_spans`) move with the whisper model, and LLM columns move with the prompt; neither is comparable across a change in its own column, so both are recorded per row.
    - Append-only; this is the 90-day trend line. Never contains LLM prose, only numbers.
-3. **Raw artifacts** → `{vault}/Español/analiza-raw/YYYY-MM-DD-{ejercicio}/`: source audio copy (optional, config), whisper JSON, metrics JSON, LLM response JSON.
+3. **Raw artifacts** → `{base}/analiza-raw/YYYY-MM-DD-{ejercicio}/`: source audio copy (optional, config), whisper JSON, metrics JSON, LLM response JSON.
 
 ## 3. Module layout
 
