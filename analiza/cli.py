@@ -1,7 +1,7 @@
 """CLI (spec §1): arg parsing, pipeline orchestration, exit codes.
 
 Exit codes: 0 ok · 1 transcription failed · 2 audio unreadable ·
-3 vault write failed · 4 LLM failed (note still written, feedback pending).
+3 output write failed · 4 LLM failed (note still written, feedback pending).
 """
 
 import datetime as dt
@@ -21,7 +21,7 @@ from analiza.examiner import PROMPT_VERSION
 
 EXIT_TRANSCRIPTION_FAILED = 1
 EXIT_AUDIO_UNREADABLE = 2
-EXIT_VAULT_WRITE_FAILED = 3
+EXIT_OUTPUT_WRITE_FAILED = 3
 EXIT_LLM_FAILED = 4
 
 def _lemmatize(text: str) -> list[str]:
@@ -39,6 +39,23 @@ def _lemmatize(text: str) -> list[str]:
         )
         return []
     return [t.lemma_.lower() for t in nlp(text) if t.is_alpha]
+
+
+def _resolve_base(
+    vault: Path | None, out: Path | None, cfg: config_mod.Config
+) -> Path:
+    """Where the three artifacts go.
+
+    Precedence: --vault > config vault_path > --out > config output_dir >
+    note.DEFAULT_OUTPUT_DIR. A vault (from either source) also selects the
+    nested Español/ layout. There is always a destination, so no run fails
+    for lack of one — the vault is optional, not required.
+    """
+    vault_root = vault or cfg.vault_path
+    return note.output_base(
+        vault_root or out or cfg.output_dir or note.DEFAULT_OUTPUT_DIR,
+        vault_layout=vault_root is not None,
+    )
 
 
 def _stats_row(
@@ -105,7 +122,12 @@ def main(
         str | None, typer.Option(help="topic, goes into note frontmatter")
     ] = None,
     vault: Annotated[
-        Path | None, typer.Option(help="vault root (default: from config)")
+        Path | None,
+        typer.Option(help="Obsidian vault root; writes under {vault}/Español/"),
+    ] = None,
+    out: Annotated[
+        Path | None,
+        typer.Option(help=f"plain output dir (default: ./{note.DEFAULT_OUTPUT_DIR})"),
     ] = None,
     no_llm: Annotated[
         bool, typer.Option("--no-llm", help="metrics only, skip examiner pass")
@@ -122,17 +144,15 @@ def main(
     lang: Annotated[str, typer.Option(help="force language")] = "es",
 ) -> None:
     """Analyze a recorded Spanish monólogo: deterministic fluency metrics,
-    DELE B2 examiner feedback, and an Obsidian session note + stats row."""
+    DELE B2 examiner feedback, and a session note + stats row.
+
+    Writes to ./analiza-out by default; --out redirects it, and --vault uses
+    the Obsidian vault layout instead."""
     cfg = config_mod.load_config()
     whisper_model = model or cfg.whisper_model
     if llm is not None:
         cfg = cfg.model_copy(update={"llm_model": llm})
-    vault_root = vault or cfg.vault_path
-    if vault_root is None and not dry_run:
-        typer.echo(
-            "error: no vault configured (--vault or config.toml vault_path)", err=True
-        )
-        raise typer.Exit(EXIT_VAULT_WRITE_FAILED)
+    base = _resolve_base(vault, out, cfg)
 
     # A. Preprocess
     try:
@@ -219,17 +239,16 @@ def main(
         typer.echo(note_md)
         raise typer.Exit(EXIT_LLM_FAILED if llm_failed else 0)
 
-    assert vault_root is not None
     try:
-        path = note.note_path(vault_root, fecha, ejercicio)
+        path = note.note_path(base, fecha, ejercicio)
         note.write_note(path, note_md)
         note.append_stats_row(
-            vault_root,
+            base,
             _stats_row(
                 fecha, ejercicio, tema, metrics_dict, examiner_result, whisper_model
             ),
         )
-        raw = note.raw_dir(vault_root, fecha, ejercicio)
+        raw = note.raw_dir(base, fecha, ejercicio)
         transcribe.persist_raw(transcription, raw / "whisper.json")
         (raw / "metrics.json").write_text(
             json.dumps(metrics_dict, ensure_ascii=False, indent=2)
@@ -241,9 +260,9 @@ def main(
         if cfg.copy_source_audio:
             shutil.copy2(audio_path, raw / audio_path.name)
         typer.echo(f"wrote {path}")
-    except (note.VaultWriteError, OSError) as e:
-        typer.echo(f"error: vault write failed: {e}", err=True)
-        raise typer.Exit(EXIT_VAULT_WRITE_FAILED) from e
+    except (note.OutputWriteError, OSError) as e:
+        typer.echo(f"error: output write failed: {e}", err=True)
+        raise typer.Exit(EXIT_OUTPUT_WRITE_FAILED) from e
 
     if llm_failed:
         raise typer.Exit(EXIT_LLM_FAILED)

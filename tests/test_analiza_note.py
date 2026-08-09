@@ -138,14 +138,34 @@ def test_render_note_without_examiner_marks_pending() -> None:
     assert "## Calcos" not in md
 
 
+def test_output_base_vault_layout_nests_under_espanol(tmp_path: Path) -> None:
+    assert note.output_base(tmp_path, vault_layout=True) == tmp_path / "Español"
+
+
+def test_output_base_plain_layout_is_flat(tmp_path: Path) -> None:
+    """No vault → the three artifacts hang directly off the output dir."""
+    base = note.output_base(tmp_path, vault_layout=False)
+    assert base == tmp_path
+    assert note.note_path(base, FECHA, "monologo") == (
+        tmp_path / "Sesiones" / "2026-07-19 monologo.md"
+    )
+    assert note.raw_dir(base, FECHA, "monologo") == (
+        tmp_path / "analiza-raw" / "2026-07-19-monologo"
+    )
+    note.append_stats_row(base, _row())
+    assert (tmp_path / "analiza-stats.csv").exists()
+    assert "Español" not in str(base)
+
+
 def test_note_path_collision(tmp_path: Path) -> None:
-    first = note.note_path(tmp_path, FECHA, "monologo")
+    base = note.output_base(tmp_path, vault_layout=True)
+    first = note.note_path(base, FECHA, "monologo")
     assert first == tmp_path / "Español" / "Sesiones" / "2026-07-19 monologo.md"
     note.write_note(first, "x")
-    second = note.note_path(tmp_path, FECHA, "monologo")
+    second = note.note_path(base, FECHA, "monologo")
     assert second.name == "2026-07-19 monologo (2).md"
     note.write_note(second, "x")
-    assert note.note_path(tmp_path, FECHA, "monologo").name == (
+    assert note.note_path(base, FECHA, "monologo").name == (
         "2026-07-19 monologo (3).md"
     )
 
@@ -162,8 +182,9 @@ def _row() -> dict[str, object]:
 
 
 def test_append_stats_row_writes_header_once(tmp_path: Path) -> None:
-    note.append_stats_row(tmp_path, _row())
-    note.append_stats_row(tmp_path, _row())
+    base = note.output_base(tmp_path, vault_layout=True)
+    note.append_stats_row(base, _row())
+    note.append_stats_row(base, _row())
     lines = (tmp_path / "Español" / "analiza-stats.csv").read_text().splitlines()
     assert lines[0] == ",".join(note.STATS_COLUMNS)
     assert len(lines) == 3
@@ -175,6 +196,7 @@ def test_append_stats_row_rejects_wrong_keys(tmp_path: Path) -> None:
 
 
 def test_raw_dir_created(tmp_path: Path) -> None:
-    raw = note.raw_dir(tmp_path, FECHA, "monologo")
+    base = note.output_base(tmp_path, vault_layout=True)
+    raw = note.raw_dir(base, FECHA, "monologo")
     assert raw == tmp_path / "Español" / "analiza-raw" / "2026-07-19-monologo"
     assert raw.is_dir()

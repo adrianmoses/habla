@@ -18,7 +18,11 @@ class Thresholds(BaseModel):
 
 
 class Config(BaseModel):
+    # Optional. When set, outputs use the Obsidian vault layout (nested under
+    # Español/); it takes precedence over output_dir. With neither set,
+    # analiza writes flat to note.DEFAULT_OUTPUT_DIR — no vault required.
     vault_path: Path | None = None
+    output_dir: Path | None = None
     whisper_model: str = "small"
     llm_provider: str = "anthropic"
     llm_model: str = "claude-sonnet-5"

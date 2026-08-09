@@ -262,3 +262,6 @@ runtime_turns.jsonl
 # Local DB backups (scripts/backup_db.sh)
 backups/
 tests/e2e/screenshots/
+
+# analiza default output dir (--out / --vault redirect it elsewhere)
+/analiza-out/
