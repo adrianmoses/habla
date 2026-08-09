@@ -47,6 +47,7 @@ def _stats_row(
     tema: str | None,
     metrics_dict: dict[str, float | int],
     examiner_result: "examiner.ExaminerResult | None",
+    whisper_model: str,
 ) -> dict[str, object]:
     """One append-only CSV row (note.STATS_COLUMNS order). LLM columns are
     empty strings when the examiner pass was skipped or failed."""
@@ -74,6 +75,7 @@ def _stats_row(
             if examiner_result is not None
             else ""
         ),
+        "whisper_model": whisper_model,
         "prompt_version": PROMPT_VERSION,
     }
 
@@ -223,7 +225,9 @@ def main(
         note.write_note(path, note_md)
         note.append_stats_row(
             vault_root,
-            _stats_row(fecha, ejercicio, tema, metrics_dict, examiner_result),
+            _stats_row(
+                fecha, ejercicio, tema, metrics_dict, examiner_result, whisper_model
+            ),
         )
         raw = note.raw_dir(vault_root, fecha, ejercicio)
         transcribe.persist_raw(transcription, raw / "whisper.json")

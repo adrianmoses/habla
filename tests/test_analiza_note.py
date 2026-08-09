@@ -157,7 +157,7 @@ def _row() -> dict[str, object]:
         "pauses_n": 5, "pause_max_s": 3.2, "fillers_per_min": 2.0,
         "connectors_unique": 3, "formal_ratio": 0.33, "mtld": 42.0,
         "errors_n": 2, "calcos_n": 1, "score_total": 8,
-        "prompt_version": "examiner_v2",
+        "whisper_model": "small", "prompt_version": "examiner_v2",
     }
 
 

@@ -11,11 +11,16 @@ from analiza.examiner import ExaminerResult
 # `errors_n` counts error *patterns* from examiner_v2 on (it counted rows,
 # i.e. roughly occurrences, under v1) — filter on prompt_version before
 # trending it across the boundary.
+#
+# whisper_model and prompt_version are the provenance pair: the deterministic
+# metrics derived from word probabilities (fillers_n, low_conf_spans) shift
+# with the whisper model, and LLM columns shift with the prompt. Neither is
+# comparable across a change in its own column, so both travel with the row.
 STATS_COLUMNS: list[str] = [
     "date", "ejercicio", "tema", "duration_s", "wpm_gross", "wpm_articulation",
     "pauses_n", "pause_max_s", "fillers_per_min", "connectors_unique",
     "formal_ratio", "mtld", "errors_n", "calcos_n", "score_total",
-    "prompt_version",
+    "whisper_model", "prompt_version",
 ]
 
 # Metric key → display label for the note's summary block.

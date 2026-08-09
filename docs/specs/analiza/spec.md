@@ -102,8 +102,9 @@ Loanwords (*email*, *random*, *software*) are deliberately **not** a category an
    - Body: metrics summary block, examiner scores, a "Calcos" section (calques listed with every instance quoted, so they are not buried among grammar rows), error table for the remaining types (pre-filled, vault table format), upgrade suggestions rendered as `frase :: contexto` bullets under "Chunks capturados" — so the weekly-review promotion flow applies unchanged.
    - Collision: if the file exists, append ` (2)`.
 2. **Stats row** → `{vault}/Español/analiza-stats.csv`
-   - `date, ejercicio, tema, duration_s, wpm_gross, wpm_articulation, pauses_n, pause_max_s, fillers_per_min, connectors_unique, formal_ratio, mtld, errors_n, calcos_n, score_total, prompt_version`
+   - `date, ejercicio, tema, duration_s, wpm_gross, wpm_articulation, pauses_n, pause_max_s, fillers_per_min, connectors_unique, formal_ratio, mtld, errors_n, calcos_n, score_total, whisper_model, prompt_version`
    - `errors_n` and `calcos_n` count **patterns**, not occurrences, from `examiner_v2` on; under `v1` `errors_n` counted rows. Filter on `prompt_version` before trending across that boundary.
+   - `whisper_model` and `prompt_version` are the provenance pair. Metrics derived from word probabilities (`fillers_n`, `low_conf_spans`) move with the whisper model, and LLM columns move with the prompt; neither is comparable across a change in its own column, so both are recorded per row.
    - Append-only; this is the 90-day trend line. Never contains LLM prose, only numbers.
 3. **Raw artifacts** → `{vault}/Español/analiza-raw/YYYY-MM-DD-{ejercicio}/`: source audio copy (optional, config), whisper JSON, metrics JSON, LLM response JSON.
 
