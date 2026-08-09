@@ -177,6 +177,37 @@ def test_run_examiner_retries_once_then_succeeds(mock_cls: MagicMock) -> None:
 
 @patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"})
 @patch("anthropic.Anthropic")
+def test_run_examiner_no_text_block_fails_fast(mock_cls: MagicMock) -> None:
+    """All budget spent thinking → no text block. Retrying burns another full
+    call on the same wall, so fail immediately with an actionable message."""
+    thinking = MagicMock()
+    thinking.type = "thinking"
+    response = MagicMock()
+    response.content = [thinking]
+    response.stop_reason = "max_tokens"
+    client = mock_cls.return_value
+    client.messages.create.return_value = response
+
+    with pytest.raises(examiner.ExaminerError, match="no text block"):
+        examiner.run_examiner("prompt", _config())
+    assert client.messages.create.call_count == 1
+
+
+@patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"})
+@patch("anthropic.Anthropic")
+def test_run_examiner_requests_enough_budget_for_thinking(
+    mock_cls: MagicMock,
+) -> None:
+    """max_tokens covers thinking + text on models that think by default."""
+    client = mock_cls.return_value
+    client.messages.create.return_value = _response(json.dumps(VALID_PAYLOAD))
+    examiner.run_examiner("prompt", _config())
+    assert client.messages.create.call_args.kwargs["max_tokens"] == examiner.MAX_TOKENS
+    assert examiner.MAX_TOKENS >= 16000
+
+
+@patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"})
+@patch("anthropic.Anthropic")
 def test_run_examiner_fails_after_second_violation(mock_cls: MagicMock) -> None:
     client = mock_cls.return_value
     client.messages.create.return_value = _response("sigo sin ser json")

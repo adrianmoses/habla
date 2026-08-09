@@ -17,6 +17,14 @@ from analiza.config import Config
 
 PROMPT_VERSION = "examiner_v2"
 
+# max_tokens caps thinking AND response text together, and the examiner models
+# think by default. At 4096 a 10-minute monólogo spent the entire budget
+# thinking and returned zero text blocks — which surfaced as "invalid JSON"
+# twice and lost the whole feedback section. Sized for a long think plus the
+# full JSON payload; budget_tokens can't bound the two separately (removed on
+# current models).
+MAX_TOKENS = 16000
+
 Criterio = Literal["coherencia", "fluidez", "correccion", "alcance"]
 
 # Error taxonomy. "calco" is the priority category — a structure translated
@@ -151,14 +159,21 @@ def run_examiner(prompt: str, config: Config) -> ExaminerResult:
         try:
             response = client.messages.create(
                 model=config.llm_model,
-                max_tokens=4096,
+                max_tokens=MAX_TOKENS,
                 messages=[{"role": "user", "content": attempt_prompt}],
             )
         except anthropic.AnthropicError as e:
             raise ExaminerError(f"LLM call failed: {e}") from e
+        # Thinking blocks are skipped here by design; an empty join means the
+        # model produced no text at all, which is the max_tokens symptom above.
         text = "".join(
             block.text for block in response.content if block.type == "text"
         )
+        if not text:
+            raise ExaminerError(
+                f"model returned no text block (stop_reason={response.stop_reason}); "
+                f"raise MAX_TOKENS if this is 'max_tokens'"
+            )
         try:
             return ExaminerResult.model_validate_json(_extract_json(text))
         except (ValidationError, ValueError) as e:
