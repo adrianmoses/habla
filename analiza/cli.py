@@ -14,7 +14,16 @@ from typing import Annotated
 
 import typer
 
-from analiza import audio, connectors, examiner, metrics, note, transcribe, vad
+from analiza import (
+    audio,
+    backfill,
+    connectors,
+    examiner,
+    metrics,
+    note,
+    transcribe,
+    vad,
+)
 from analiza import config as config_mod
 from analiza.conectores_b2 import CONECTORES
 from analiza.examiner import PROMPT_VERSION
@@ -109,8 +118,8 @@ app = typer.Typer(
 )
 
 
-@app.command()
-def main(
+@app.command("sesion")
+def sesion(
     audio_path: Annotated[
         Path,
         typer.Argument(metavar="AUDIO", help="path to .wav/.m4a/.mp3/.ogg"),
@@ -265,6 +274,54 @@ def main(
         raise typer.Exit(EXIT_OUTPUT_WRITE_FAILED) from e
 
     if llm_failed:
+        raise typer.Exit(EXIT_LLM_FAILED)
+
+
+@app.command("backfill-patrones")
+def backfill_patrones(
+    vault: Annotated[
+        Path | None,
+        typer.Option(help="Obsidian vault root; reads under {vault}/Español/"),
+    ] = None,
+    out: Annotated[
+        Path | None,
+        typer.Option(help=f"plain output dir (default: ./{note.DEFAULT_OUTPUT_DIR})"),
+    ] = None,
+    dry_run: Annotated[
+        bool, typer.Option("--dry-run", help="report assignments, write nothing")
+    ] = False,
+) -> None:
+    """Assign pattern_id to stored sessions examined before the vocabulary.
+
+    Reads persisted examiner.json artifacts and classifies each error row
+    against patrones_b2 — no audio, no re-transcription. Idempotent: sessions
+    that already carry pattern_id are skipped."""
+    cfg = config_mod.load_config()
+    base = _resolve_base(vault, out, cfg)
+
+    outcomes = backfill.backfill_all(
+        base, cfg, dry_run=dry_run, today=dt.date.today()
+    )
+    if not outcomes:
+        typer.echo(f"no stored sessions under {base / 'analiza-raw'}")
+        return
+
+    for o in outcomes:
+        sesion_name = o.path.parent.name
+        detail = f" — {o.detail}" if o.detail else ""
+        count = f" ({o.assigned} patrones)" if o.assigned else ""
+        typer.echo(f"{o.status:8} {sesion_name}{count}{detail}")
+
+    failed = [o for o in outcomes if o.status == "failed"]
+    assigned = sum(1 for o in outcomes if o.status == "assigned")
+    typer.echo(
+        f"\n{assigned} assigned, "
+        f"{sum(1 for o in outcomes if o.status == 'skipped')} skipped, "
+        f"{len(failed)} failed"
+    )
+    # A failed file leaves the rest of the corpus correctly assigned; exit
+    # non-zero so a scripted run notices, but never abort mid-walk.
+    if failed:
         raise typer.Exit(EXIT_LLM_FAILED)
 
 

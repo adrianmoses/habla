@@ -13,7 +13,7 @@ import json
 import os
 from typing import Literal
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from analiza.config import Config
 from analiza.patrones_b2 import PATRONES, PatternId, Tipo
@@ -84,6 +84,24 @@ class ExaminerResult(BaseModel):
     subjuntivo: list[SubjuntivoCheck]
     mejoras: list[Mejora] = Field(min_length=2, max_length=3)
     enfoque_proxima_sesion: str
+
+    @model_validator(mode="after")
+    def _pattern_ids_are_unique(self) -> "ExaminerResult":
+        """One row per fault is the whole premise of pattern grouping, so two
+        rows sharing an id means one of them is mis-keyed. Caught client-side
+        (the API cannot express this), which routes it into the single retry.
+
+        `otro` is exempt: it is a bucket, not a fault, so several unrelated
+        findings legitimately land there.
+        """
+        tracked = [e.pattern_id for e in self.errores if e.pattern_id != "otro"]
+        duplicates = sorted({p for p in tracked if tracked.count(p) > 1})
+        if duplicates:
+            raise ValueError(
+                f"pattern_id repeated across rows: {duplicates}. Each fault gets "
+                "one row; merge them or pick the id that fits each separately."
+            )
+        return self
 
     @property
     def calcos(self) -> list[ErrorRow]:

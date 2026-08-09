@@ -9,12 +9,13 @@ Design principle: **deterministic layer for trends, LLM layer for judgment.** Me
 ## 1. CLI
 
 ```
-analiza AUDIO [options]
+analiza sesion AUDIO [options]     analyze one recording
+analiza backfill-patrones [opts]   assign pattern_id to stored sessions
 
 Arguments:
   AUDIO                    path to .wav/.m4a/.mp3/.ogg
 
-Options:
+Options (sesion):
   --ejercicio TEXT         monologo | narrar-dia          [default: monologo]
   --tema TEXT              topic, goes into note frontmatter
   --out PATH               plain output dir               [default: ./analiza-out]
@@ -25,10 +26,19 @@ Options:
   --dry-run                print note to stdout, write nothing
   --lang TEXT              force language                 [default: es]
 
+Options (backfill-patrones):
+  --out / --vault PATH     same resolution as sesion
+  --dry-run                report assignments, write nothing
+
 Config: ~/.config/analiza/config.toml
   vault_path, output_dir, whisper_model, llm_provider/model/key env var name,
   connector list path, thresholds (overridable per run)
 ```
+
+**Subcommands since spec 034.** The analysis run was `analiza AUDIO` through
+v0.x; it is now `analiza sesion AUDIO`. A bare-audio default cannot coexist
+with the `backfill-patrones` / `progreso` subcommands the progress work adds —
+`analiza progreso` would be ambiguous with a recording named `progreso`.
 
 Exit codes: 0 ok · 1 transcription failed · 2 audio unreadable · 3 output write failed · 4 LLM failed (note still written, feedback section marked pending).
 

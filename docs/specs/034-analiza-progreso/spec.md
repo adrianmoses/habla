@@ -301,6 +301,19 @@ until there is history.
    a verdict) turns out to be load-bearing rather than stylistic, and WS2
    should additionally record whether each session hit the cap, so a run at
    10/10 can be treated as truncated rather than complete.
+
+   **Second ambiguity, found running the backfill (2026-08-10):** the
+   vocabulary itself is versionless. Running WS1's backfill over the stored
+   session assigned "uso incorrecto de 'ninguno de planes' / doble negación" to
+   `autocorreccion-excesiva` — wrong, because no entry covered quantifiers and
+   indefinites; adding `cuantificadores-indefinidos` fixed it. So the
+   vocabulary will keep growing, and a pattern absent from an older session may
+   be absent only because its id did not exist yet. This is the same class of
+   comparability hazard as `prompt_version` and `whisper_model`, and WS2 needs
+   the same treatment: a vocabulary version recorded per session, and
+   segmentation that refuses to read absence across a boundary where the id was
+   unavailable. **A CSV column is the likely shape, which puts this in WS2's
+   scope rather than WS1's.**
 2. **Backfill dry run** over the stored corpus, hand-checked, to confirm ids are
    assigned sensibly and `otro` is not a dumping ground.
 3. **Threshold calibration** deferred until ≥10 sessions exist. Ship the gates

@@ -232,6 +232,26 @@ def test_pattern_id_is_required_and_enum_constrained() -> None:
     ).pattern_id == "por-vs-para"
 
 
+def test_repeated_pattern_id_is_rejected() -> None:
+    """One row per fault is the premise of pattern grouping, so two rows
+    sharing an id means one is mis-keyed. Observed for real: a backfill run
+    assigned `autocorreccion-excesiva` to both the self-correction row and a
+    double-negation row."""
+    rows = VALID_PAYLOAD["errores"]
+    dup = [{**rows[0]}, {**rows[1], "pattern_id": rows[0]["pattern_id"]}]
+    with pytest.raises(ValidationError, match="repeated across rows"):
+        ExaminerResult.model_validate({**VALID_PAYLOAD, "errores": dup})
+
+
+def test_repeated_otro_is_allowed() -> None:
+    """`otro` is a bucket, not a fault — several unrelated findings land there
+    legitimately, and it is excluded from recurrence tracking anyway."""
+    rows = VALID_PAYLOAD["errores"]
+    both_otro = [{**rows[0], "pattern_id": "otro"}, {**rows[1], "pattern_id": "otro"}]
+    result = ExaminerResult.model_validate({**VALID_PAYLOAD, "errores": both_otro})
+    assert [e.pattern_id for e in result.errores] == ["otro", "otro"]
+
+
 def test_documented_schema_has_not_drifted_from_the_vocabulary() -> None:
     """output_schema_v3.json is documentation — structured outputs send the
     pydantic-derived schema, not this file — but the prompt names it, so a

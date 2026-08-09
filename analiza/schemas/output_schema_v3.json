@@ -84,6 +84,8 @@
               "concordancia-numero",
               "concordancia-sujeto-verbo",
               "genero-sustantivo-irregular",
+              "cuantificadores-indefinidos",
+              "articulo-innecesario-o-ausente",
               "por-vs-para",
               "regimen-verbo-preposicion",
               "verbo-sin-preposicion",

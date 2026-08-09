@@ -56,6 +56,9 @@ PatternId = Literal[
     "concordancia-numero",
     "concordancia-sujeto-verbo",
     "genero-sustantivo-irregular",
+    # Determinantes y cuantificadores
+    "cuantificadores-indefinidos",
+    "articulo-innecesario-o-ausente",
     # Preposiciones y régimen
     "por-vs-para",
     "regimen-verbo-preposicion",
@@ -235,6 +238,19 @@ PATRONES: list[Patron] = [
         "Género de sustantivos irregulares",
         "gramatica",
         ("la problema", "el mano", "la día"),
+    ),
+    # ── Determinantes y cuantificadores ─────────────────────────────────────
+    Patron(
+        "cuantificadores-indefinidos",  # corpus — gap found by the WS1 backfill
+        "Indefinidos y negativos (ningún/ninguno, algún, doble negación)",
+        "gramatica",
+        ("no tengo ninguno de planes", "ningún de mis amigos", "no vi nadie"),
+    ),
+    Patron(
+        "articulo-innecesario-o-ausente",
+        "Artículo sobrante o ausente (calco del inglés)",
+        "calco",
+        ("me gusta la música clásica → me gusta música", "soy un profesor"),
     ),
     # ── Preposiciones y régimen ─────────────────────────────────────────────
     Patron(
