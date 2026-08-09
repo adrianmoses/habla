@@ -1,12 +1,13 @@
-"""Examiner tests (spec §2E): prompt build and retry-on-schema-violation."""
+"""Examiner tests (spec §2E): prompt build, structured outputs, one retry."""
 
-import json
 from unittest.mock import MagicMock, patch
 
 import pytest
+from pydantic import ValidationError
 
 from analiza import examiner
 from analiza.config import Config
+from analiza.examiner import ExaminerResult
 
 VALID_PAYLOAD = {
     "puntuaciones": [
@@ -78,13 +79,26 @@ def test_build_prompt_empty_optionals() -> None:
     assert "(ninguno)" in prompt
 
 
-def _response(text: str) -> MagicMock:
-    block = MagicMock()
-    block.type = "text"
-    block.text = text
+def _parsed(payload: dict | None = None, stop_reason: str = "end_turn") -> MagicMock:
+    """A messages.parse() result: the API guarantees the shape, so the SDK
+    hands back an already-validated ExaminerResult (None if there was no text
+    block at all)."""
     response = MagicMock()
-    response.content = [block]
+    response.parsed_output = (
+        None if payload is None else ExaminerResult.model_validate(payload)
+    )
+    response.stop_reason = stop_reason
     return response
+
+
+def _validation_error() -> ValidationError:
+    """A real pydantic error, as parse() raises when a count/range constraint
+    is violated — those are description hints to the API, not enforced by it."""
+    try:
+        ExaminerResult.model_validate({})
+    except ValidationError as e:
+        return e
+    raise AssertionError("expected ValidationError")
 
 
 def _config() -> Config:
@@ -93,12 +107,17 @@ def _config() -> Config:
 
 @patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"})
 @patch("anthropic.Anthropic")
-def test_run_examiner_parses_valid_response(mock_cls: MagicMock) -> None:
+def test_run_examiner_requests_structured_output(mock_cls: MagicMock) -> None:
+    """The schema is passed to the API, so the shape can't come back wrong."""
     client = mock_cls.return_value
-    client.messages.create.return_value = _response(json.dumps(VALID_PAYLOAD))
+    client.messages.parse.return_value = _parsed(VALID_PAYLOAD)
     result = examiner.run_examiner("prompt", _config())
     assert result.enfoque_proxima_sesion == "foco"
-    assert client.messages.create.call_count == 1
+    assert client.messages.parse.call_count == 1
+    assert client.messages.create.call_count == 0  # no unconstrained call path
+    assert client.messages.parse.call_args.kwargs["output_format"] is (
+        examiner.ExaminerResult
+    )
 
 
 @patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"})
@@ -106,7 +125,7 @@ def test_run_examiner_parses_valid_response(mock_cls: MagicMock) -> None:
 def test_run_examiner_groups_errors_by_pattern(mock_cls: MagicMock) -> None:
     """Instances live inside a pattern row, and calcos are separable."""
     client = mock_cls.return_value
-    client.messages.create.return_value = _response(json.dumps(VALID_PAYLOAD))
+    client.messages.parse.return_value = _parsed(VALID_PAYLOAD)
     result = examiner.run_examiner("prompt", _config())
     assert len(result.errores) == 2
     assert [e.tipo for e in result.calcos] == ["calco"]
@@ -117,62 +136,50 @@ def test_run_examiner_groups_errors_by_pattern(mock_cls: MagicMock) -> None:
     assert [e.patron for e in result.otros_errores] == ["por vs para"]
 
 
-@patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"})
-@patch("anthropic.Anthropic")
-def test_run_examiner_retries_on_unknown_tipo(mock_cls: MagicMock) -> None:
-    """An off-enum tipo (e.g. the dropped "anglicismo") must not slip through."""
+def test_run_examiner_enum_is_enforced_by_the_schema() -> None:
+    """An off-enum tipo (e.g. the dropped "anglicismo") can no longer reach the
+    client: the API constrains generation to the enum. The model-side guard
+    stays as the backstop for any path that bypasses structured outputs."""
     bad = {**VALID_PAYLOAD, "errores": [{**VALID_PAYLOAD["errores"][0],
                                          "tipo": "anglicismo"}]}
-    client = mock_cls.return_value
-    client.messages.create.side_effect = [
-        _response(json.dumps(bad)),
-        _response(json.dumps(VALID_PAYLOAD)),
-    ]
-    result = examiner.run_examiner("prompt", _config())
-    assert client.messages.create.call_count == 2
-    assert [e.tipo for e in result.errores] == ["calco", "gramatica"]
-
-
-@patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"})
-@patch("anthropic.Anthropic")
-def test_run_examiner_retries_on_empty_instancias(mock_cls: MagicMock) -> None:
-    """A pattern with no occurrence is meaningless — min_length=1 rejects it."""
-    bad = {**VALID_PAYLOAD, "errores": [{**VALID_PAYLOAD["errores"][0],
-                                         "instancias": []}]}
-    client = mock_cls.return_value
-    client.messages.create.side_effect = [
-        _response(json.dumps(bad)),
-        _response(json.dumps(VALID_PAYLOAD)),
-    ]
-    examiner.run_examiner("prompt", _config())
-    assert client.messages.create.call_count == 2
-
-
-@patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"})
-@patch("anthropic.Anthropic")
-def test_run_examiner_strips_code_fences(mock_cls: MagicMock) -> None:
-    client = mock_cls.return_value
-    client.messages.create.return_value = _response(
-        f"```json\n{json.dumps(VALID_PAYLOAD)}\n```"
-    )
-    assert examiner.run_examiner("prompt", _config()).enfoque_proxima_sesion == "foco"
+    with pytest.raises(ValidationError):
+        ExaminerResult.model_validate(bad)
 
 
 @patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"})
 @patch("anthropic.Anthropic")
 def test_run_examiner_retries_once_then_succeeds(mock_cls: MagicMock) -> None:
+    """Count/range constraints are description hints to the API, not enforced
+    by it — a violation surfaces as a pydantic error from parse(), and that is
+    what the single retry is for."""
     client = mock_cls.return_value
-    client.messages.create.side_effect = [
-        _response("no es json"),
-        _response(json.dumps(VALID_PAYLOAD)),
+    client.messages.parse.side_effect = [
+        _validation_error(),
+        _parsed(VALID_PAYLOAD),
     ]
     result = examiner.run_examiner("prompt", _config())
     assert result.enfoque_proxima_sesion == "foco"
-    assert client.messages.create.call_count == 2
-    retry_prompt = client.messages.create.call_args_list[1].kwargs["messages"][0][
+    assert client.messages.parse.call_count == 2
+    retry_prompt = client.messages.parse.call_args_list[1].kwargs["messages"][0][
         "content"
     ]
     assert "no cumplió el esquema" in retry_prompt
+
+
+def test_unenforced_constraints_become_description_hints() -> None:
+    """Structured outputs reject count/range constraints, so the SDK folds them
+    into each field's description — the model still sees them. If this stops
+    holding, those limits are silently unenforced end to end."""
+    from anthropic.lib._parse._transform import transform_schema
+
+    schema = transform_schema(ExaminerResult.model_json_schema())
+    assert "maxItems: 10" in schema["properties"]["errores"]["description"]
+    assert (
+        "minimum: 1"
+        in schema["$defs"]["Puntuacion"]["properties"]["puntuacion"]["description"]
+    )
+    # instancias' minItems IS supported natively, so it stays a real constraint.
+    assert schema["$defs"]["ErrorRow"]["properties"]["instancias"]["minItems"] == 1
 
 
 @patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"})
@@ -180,17 +187,12 @@ def test_run_examiner_retries_once_then_succeeds(mock_cls: MagicMock) -> None:
 def test_run_examiner_no_text_block_fails_fast(mock_cls: MagicMock) -> None:
     """All budget spent thinking → no text block. Retrying burns another full
     call on the same wall, so fail immediately with an actionable message."""
-    thinking = MagicMock()
-    thinking.type = "thinking"
-    response = MagicMock()
-    response.content = [thinking]
-    response.stop_reason = "max_tokens"
     client = mock_cls.return_value
-    client.messages.create.return_value = response
+    client.messages.parse.return_value = _parsed(None, stop_reason="max_tokens")
 
     with pytest.raises(examiner.ExaminerError, match="no text block"):
         examiner.run_examiner("prompt", _config())
-    assert client.messages.create.call_count == 1
+    assert client.messages.parse.call_count == 1
 
 
 @patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"})
@@ -200,9 +202,9 @@ def test_run_examiner_requests_enough_budget_for_thinking(
 ) -> None:
     """max_tokens covers thinking + text on models that think by default."""
     client = mock_cls.return_value
-    client.messages.create.return_value = _response(json.dumps(VALID_PAYLOAD))
+    client.messages.parse.return_value = _parsed(VALID_PAYLOAD)
     examiner.run_examiner("prompt", _config())
-    assert client.messages.create.call_args.kwargs["max_tokens"] == examiner.MAX_TOKENS
+    assert client.messages.parse.call_args.kwargs["max_tokens"] == examiner.MAX_TOKENS
     assert examiner.MAX_TOKENS >= 16000
 
 
@@ -210,10 +212,10 @@ def test_run_examiner_requests_enough_budget_for_thinking(
 @patch("anthropic.Anthropic")
 def test_run_examiner_fails_after_second_violation(mock_cls: MagicMock) -> None:
     client = mock_cls.return_value
-    client.messages.create.return_value = _response("sigo sin ser json")
-    with pytest.raises(examiner.ExaminerError):
+    client.messages.parse.side_effect = [_validation_error(), _validation_error()]
+    with pytest.raises(examiner.ExaminerError, match="after retry"):
         examiner.run_examiner("prompt", _config())
-    assert client.messages.create.call_count == 2
+    assert client.messages.parse.call_count == 2
 
 
 @patch.dict("os.environ", {}, clear=True)

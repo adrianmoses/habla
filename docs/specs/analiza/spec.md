@@ -83,7 +83,9 @@ All thresholds in config, defaults as above. Metrics output is a flat dict → J
   - Role: acreditado DELE B2 oral examiner, peninsular Spanish.
   - Caveats given to model: transcript may have silently corrected learner errors; filler counts are underestimates; do not comment on pronunciation (not observable from text).
   - Tasks: (1) score 1–3 per rubric criterion — coherencia, fluidez, corrección, alcance — with one-line justification; (2) errors grouped **by pattern**, `tipo | patrón | debería ser | por qué | instancias` (only errors visible in transcript, max 10 **patterns**, calques first then most instructive); (3) subjunctive check on any matched trigger connectors (`de ahí que`, `a menos que`, …) — correct/incorrect per instance; (4) 2–3 upgrade suggestions: phrases the speaker used a rodeo for, with the B2 chunk that replaces them; (5) one focus for next session.
-  - Output: strict JSON schema (versioned, `output_schema_v2.json`); parse with fallback → on schema violation, one retry with error appended, then mark feedback section as failed.
+  - Output: **structured outputs** — the request carries the `ExaminerResult` schema, so the API constrains generation and the response *shape* (field names, types, the `tipo` enum, required keys) cannot come back wrong. No JSON is parsed out of prose.
+  - The API rejects count and range constraints, so the SDK folds them into each field's `description`: max 10 patterns, scores 1–3, and 2–3 mejoras are hints the model reads but only pydantic enforces, client-side. A violation there is the one case the single retry exists for; after it, the feedback section is marked failed.
+  - `output_schema_v2.json` is documentation of the contract; `examiner.ExaminerResult` is the executable source of truth.
 
 #### Error grouping and `tipo` (examiner_v2)
 
