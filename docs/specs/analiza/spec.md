@@ -147,8 +147,8 @@ analiza/
 
 ## 6. Later (explicitly not v0.1)
 
-- **v1.1** `analiza stats` subcommand: plot WPM/formal-ratio/MTLD trends from the CSV; flag plateaus.
-- **v1.2** batch mode: `analiza backfill dir/` for reprocessing old recordings from persisted raw JSON.
+- **v1.1** ~~`analiza stats` subcommand: plot WPM/formal-ratio/MTLD trends from the CSV; flag plateaus.~~ **Superseded by [spec 034](../034-analiza-progreso/spec.md)**, which takes the wider read: this slot assumed the CSV was the whole trend line, but the recurrence signal a learner cares about lives in the per-session `examiner.json` files — and cannot be tracked until `patron` is replaced by a stable key (see 034 §Why).
+- **v1.2** batch mode: `analiza backfill dir/` for reprocessing old recordings from persisted raw JSON. Partially pulled forward by [spec 034](../034-analiza-progreso/spec.md) as `analiza backfill-patrones`, which reprocesses stored `examiner.json` without re-transcribing.
 - **v2** pronunciation pass: send audio natively to a multimodal model for pace/intonation/specific-sound feedback; separate note section, separate prompt version.
 - **v2** Habla integration: "monólogo mode" — Habla serves the topic + timed prep, records, then shells out to `analiza`. Shared assets: examiner prompt, rubric schema, connector list.
 ```
