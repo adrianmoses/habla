@@ -33,7 +33,20 @@ def examiner_result() -> ExaminerResult:
             for c in ("coherencia", "fluidez", "correccion", "alcance")
         ],
         errores=[
-            ErrorRow(dije="fui en casa", deberia_ser="fui a casa", por_que="régimen")
+            ErrorRow(
+                tipo="calco",
+                patron="hacer sentido",
+                deberia_ser="tener sentido",
+                por_que="traducción literal de «make sense»",
+                instancias=["eso no hace sentido", "no hace sentido para mí"],
+            ),
+            ErrorRow(
+                tipo="gramatica",
+                patron="régimen preposicional con verbos de movimiento",
+                deberia_ser="fui a casa",
+                por_que="régimen",
+                instancias=["fui en casa"],
+            ),
         ],
         subjuntivo=[
             SubjuntivoCheck(conector="a menos que", frase="a menos que vengas",
@@ -52,27 +65,77 @@ def examiner_result() -> ExaminerResult:
 def test_render_note_with_examiner() -> None:
     md = note.render_note(
         fecha=FECHA, ejercicio="monologo", tema="viajes", duration_s=120.0,
-        metrics=METRICS, examiner=examiner_result(), prompt_version="examiner_v1",
+        metrics=METRICS, examiner=examiner_result(), prompt_version="examiner_v2",
     )
     assert md.startswith("---\ntype: sesion\n")
     assert "fecha: 2026-07-19" in md
     assert "duracion: 2.0" in md
     assert "tema: viajes" in md
     assert "cota inferior" in md  # fillers labeled as floor
-    assert "| fui en casa | fui a casa | régimen |" in md
     assert "**Total: 8/12**" in md
     assert "## Chunks capturados" in md
     assert "- el abrelatas :: cocina" in md
-    assert "examiner_v1" in md
+    assert "examiner_v2" in md
+
+
+def test_render_note_separates_calcos_from_other_errors() -> None:
+    md = note.render_note(
+        fecha=FECHA, ejercicio="monologo", tema="viajes", duration_s=120.0,
+        metrics=METRICS, examiner=examiner_result(), prompt_version="examiner_v2",
+    )
+    calcos, errores = md.split("## Errores")
+    # Calque section: own heading, instance count, every instance quoted.
+    assert "## Calcos" in calcos
+    assert "**hacer sentido** → tener sentido" in calcos
+    assert "(2×)" in calcos
+    assert "“eso no hace sentido”" in calcos
+    assert "“no hace sentido para mí”" in calcos
+    # ...and it does not reappear in the errors table below.
+    assert "hacer sentido" not in errores
+    assert "| régimen preposicional con verbos de movimiento | fui a casa |" in errores
+    assert "| gramatica | fui en casa |" in errores
+
+
+def test_render_note_escapes_pipes_in_error_table() -> None:
+    """A pipe in LLM-supplied text must not split the markdown row."""
+    result = examiner_result()
+    result.errores = [
+        ErrorRow(
+            tipo="lexico", patron="a | b", deberia_ser="c", por_que="d\ne",
+            instancias=["f | g"],
+        )
+    ]
+    md = note.render_note(
+        fecha=FECHA, ejercicio="monologo", tema=None, duration_s=120.0,
+        metrics=METRICS, examiner=result, prompt_version="examiner_v2",
+    )
+    row = next(
+        line for line in md.splitlines() if line.startswith("| a ")
+    )
+    assert row == r"| a \| b | c | d e | lexico | f \| g |"
+    assert row.count("|") - row.count(r"\|") == 6  # 5 cells → 6 delimiters
+
+
+def test_render_note_no_calcos_marks_section_empty() -> None:
+    result = examiner_result()
+    result.errores = [e for e in result.errores if e.tipo != "calco"]
+    md = note.render_note(
+        fecha=FECHA, ejercicio="monologo", tema=None, duration_s=120.0,
+        metrics=METRICS, examiner=result, prompt_version="examiner_v2",
+    )
+    calcos = md.split("## Errores")[0]
+    assert "## Calcos" in calcos
+    assert "_Ninguno visible en la transcripción._" in calcos
 
 
 def test_render_note_without_examiner_marks_pending() -> None:
     md = note.render_note(
         fecha=FECHA, ejercicio="monologo", tema=None, duration_s=60.0,
-        metrics=METRICS, examiner=None, prompt_version="examiner_v1",
+        metrics=METRICS, examiner=None, prompt_version="examiner_v2",
     )
     assert "Pendiente" in md
     assert "## Chunks capturados" not in md
+    assert "## Calcos" not in md
 
 
 def test_note_path_collision(tmp_path: Path) -> None:
@@ -93,7 +156,8 @@ def _row() -> dict[str, object]:
         "duration_s": 120.0, "wpm_gross": 90.0, "wpm_articulation": 108.0,
         "pauses_n": 5, "pause_max_s": 3.2, "fillers_per_min": 2.0,
         "connectors_unique": 3, "formal_ratio": 0.33, "mtld": 42.0,
-        "errors_n": 1, "score_total": 8, "prompt_version": "examiner_v1",
+        "errors_n": 2, "calcos_n": 1, "score_total": 8,
+        "whisper_model": "small", "prompt_version": "examiner_v2",
     }
 
 

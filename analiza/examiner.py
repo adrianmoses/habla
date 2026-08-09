@@ -1,7 +1,8 @@
 """LLM examiner (spec §2E): prompt build, call, schema validation, one retry.
 
-Prompt contract is a versioned asset (prompts/examiner_v1.md); the version is
-recorded in every output because prompt changes break score comparability.
+Prompt contract is a versioned asset (prompts/{PROMPT_VERSION}.md); the version
+is recorded in every output because prompt changes break score comparability.
+Old versions are kept alongside the current one so past outputs stay readable.
 """
 
 import importlib.resources
@@ -14,9 +15,15 @@ from pydantic import BaseModel, Field, ValidationError
 
 from analiza.config import Config
 
-PROMPT_VERSION = "examiner_v1"
+PROMPT_VERSION = "examiner_v2"
 
 Criterio = Literal["coherencia", "fluidez", "correccion", "alcance"]
+
+# Error taxonomy. "calco" is the priority category — a structure translated
+# literally from English, often grammatical but unidiomatic. Loanwords
+# ("email", "random") are deliberately NOT a category: acceptance varies by
+# region and register, so flagging them is noise rather than a learner error.
+Tipo = Literal["calco", "gramatica", "lexico", "registro"]
 
 
 class Puntuacion(BaseModel):
@@ -26,9 +33,21 @@ class Puntuacion(BaseModel):
 
 
 class ErrorRow(BaseModel):
-    dije: str
+    """One error *pattern*, not one occurrence.
+
+    A repeated fault (por/para, ser/estar) is a single row carrying every
+    instance, so the max_length cap on `errores` budgets distinct things to
+    work on rather than raw occurrences — six por/para hits no longer crowd
+    out five other error types.
+    """
+
+    tipo: Tipo
+    patron: str  # names the fault, e.g. "por vs para — causa frente a finalidad"
     deberia_ser: str
     por_que: str
+    # Every occurrence, verbatim from the transcript. Uncapped: len() is the
+    # severity signal that a per-instance row list threw away.
+    instancias: list[str] = Field(min_length=1)
 
 
 class SubjuntivoCheck(BaseModel):
@@ -46,10 +65,20 @@ class Mejora(BaseModel):
 
 class ExaminerResult(BaseModel):
     puntuaciones: list[Puntuacion] = Field(min_length=4, max_length=4)
+    # 10 *patterns*, not 10 occurrences — see ErrorRow.
     errores: list[ErrorRow] = Field(max_length=10)
     subjuntivo: list[SubjuntivoCheck]
     mejoras: list[Mejora] = Field(min_length=2, max_length=3)
     enfoque_proxima_sesion: str
+
+    @property
+    def calcos(self) -> list[ErrorRow]:
+        return [e for e in self.errores if e.tipo == "calco"]
+
+    @property
+    def otros_errores(self) -> list[ErrorRow]:
+        """Non-calque patterns; calques render in their own note section."""
+        return [e for e in self.errores if e.tipo != "calco"]
 
 
 class ExaminerError(Exception):
@@ -71,7 +100,7 @@ def build_prompt(
     low_conf_hints: list[tuple[float, float]],
     subjunctive_connectors: list[str],
 ) -> str:
-    """Fill the examiner_v1.md template with this session's inputs.
+    """Fill the current prompt template with this session's inputs.
 
     Sequential .replace(), not str.format() — the template body contains
     literal braces in the output-schema description.
