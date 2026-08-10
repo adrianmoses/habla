@@ -314,3 +314,88 @@ def test_prompt_carries_vocabulary_and_rows() -> None:
 def test_missing_api_key_is_reported() -> None:
     with pytest.raises(Exception, match="ANTHROPIC_API_KEY"):
         backfill.assign(V2_PAYLOAD["errores"], _config())
+
+
+# ── partial-write safety ───────────────────────────────────────────────────
+#
+# progreso reads a backfilled session's silence about a pattern as
+# inconclusive, and decides that from backfill.json merely existing. So the
+# dangerous half-write is not a lost file — it is ids on disk with no marker
+# beside them: every later run skips the session (all rows have ids) and
+# progreso reads the weakest assignments in the corpus as native evidence.
+
+
+def _fail_writing(nombre: str):
+    """A _write_json that fails for one filename and works for the rest."""
+    real = backfill._write_json
+
+    def fake(path: Path, payload: Any) -> None:
+        if path.name == nombre:
+            raise OSError("no space left on device")
+        real(path, payload)
+
+    return fake
+
+
+@patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"})
+@patch("anthropic.Anthropic")
+def test_a_failed_marker_leaves_the_ids_unassigned(
+    mock_cls: MagicMock, tmp_path: Path
+) -> None:
+    mock_cls.return_value.messages.parse.return_value = _assignment(
+        (0, "calco-hacer-sentido"), (1, "por-vs-para")
+    )
+    p = _session(tmp_path, "2026-08-01-monologo", V2_PAYLOAD)
+    before = p.read_text()
+
+    with patch.object(backfill, "_write_json", _fail_writing("backfill.json")):
+        out = backfill.backfill_file(p, _config(), dry_run=False, today=TODAY)
+
+    assert out.status == "failed"
+    assert p.read_text() == before
+    # The session is still visibly unfinished, so the next run redoes it
+    # instead of skipping a file that would read as natively assigned.
+    assert backfill.needs_backfill(json.loads(p.read_text()))
+
+
+@patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"})
+@patch("anthropic.Anthropic")
+def test_a_failed_payload_write_leaves_the_session_retryable(
+    mock_cls: MagicMock, tmp_path: Path
+) -> None:
+    """The other half-write. The marker is orphaned, which is harmless: the
+    rows still carry no id, so the session stays inconclusive rather than
+    being promoted, and it is still queued for the next run."""
+    mock_cls.return_value.messages.parse.return_value = _assignment(
+        (0, "calco-hacer-sentido"), (1, "por-vs-para")
+    )
+    p = _session(tmp_path, "2026-08-01-monologo", V2_PAYLOAD)
+
+    with patch.object(backfill, "_write_json", _fail_writing("examiner.json")):
+        out = backfill.backfill_file(p, _config(), dry_run=False, today=TODAY)
+
+    assert out.status == "failed"
+    assert "rerun" in out.detail
+    # Not truncated: the payload is intact and still parses.
+    assert backfill.needs_backfill(json.loads(p.read_text()))
+    assert (p.parent / "backfill.json").exists()
+
+
+@patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"})
+@patch("anthropic.Anthropic")
+def test_neither_file_is_written_in_place(
+    mock_cls: MagicMock, tmp_path: Path
+) -> None:
+    """Both go through a temp file and an atomic replace, so a crash mid-write
+    cannot truncate the durable corpus. No .tmp survives a clean run."""
+    mock_cls.return_value.messages.parse.return_value = _assignment(
+        (0, "calco-hacer-sentido"), (1, "por-vs-para")
+    )
+    p = _session(tmp_path, "2026-08-01-monologo", V2_PAYLOAD)
+
+    out = backfill.backfill_file(p, _config(), dry_run=False, today=TODAY)
+
+    assert out.status == "assigned"
+    assert list(p.parent.glob("*.tmp")) == []
+    assert not backfill.needs_backfill(json.loads(p.read_text()))
+    assert (p.parent / "backfill.json").exists()

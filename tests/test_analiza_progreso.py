@@ -556,3 +556,48 @@ def test_the_note_carries_the_narrative_when_there_is_one() -> None:
     assert "Drill por/para." in nota
     assert "_progreso_version: progreso_v1_" in nota
     assert "por debajo del mínimo" not in nota
+
+
+def test_a_later_session_on_the_same_date_counts_as_absence() -> None:
+    """Two exercises in one day are two sessions. Comparing dates rather than
+    positions would drop the second one, so a fault seen in the morning's
+    monólogo and absent from that afternoon's narración counted as zero
+    sessions gone by, delaying the absence threshold or never reaching it."""
+    sesiones = [
+        sesion(1, ejercicio="monologo", patrones={"por-vs-para": 2}),
+        sesion(1, ejercicio="narrar-dia", patrones={}),
+        sesion(2, patrones={}),
+        sesion(3, patrones={}),
+    ]
+    (recurrencia,) = progreso.pattern_recurrence(sesiones, ausencia_n=3)
+    assert recurrencia.sesiones_desde_ultima == 3
+    assert recurrencia.ausencias_concluyentes == 3
+    assert recurrencia.estado == "ausente"
+
+
+def test_an_earlier_session_on_the_same_date_is_not_an_absence() -> None:
+    """The other direction: the narración came first and the fault appeared in
+    that day's monólogo, so nothing has gone by since."""
+    sesiones = [
+        sesion(1, ejercicio="monologo", patrones={"por-vs-para": 2}),
+        sesion(1, ejercicio="narrar-dia", patrones={"por-vs-para": 1}),
+    ]
+    (recurrencia,) = progreso.pattern_recurrence(sesiones, ausencia_n=3)
+    assert recurrencia.sesiones_n == 2
+    assert recurrencia.sesiones_desde_ultima == 0
+    assert recurrencia.estado == "persistente"
+
+
+def test_recurrence_sorts_sessions_it_is_handed_out_of_order() -> None:
+    """Positions only mean "since" if the list is in order, so the function
+    orders it rather than trusting its caller."""
+    ordenadas = [
+        sesion(1, patrones={"por-vs-para": 2}),
+        sesion(2, patrones={}),
+        sesion(3, patrones={}),
+        sesion(4, patrones={}),
+    ]
+    barajadas = [ordenadas[2], ordenadas[0], ordenadas[3], ordenadas[1]]
+    assert progreso.pattern_recurrence(
+        barajadas, ausencia_n=3
+    ) == progreso.pattern_recurrence(ordenadas, ausencia_n=3)

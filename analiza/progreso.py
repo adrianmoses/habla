@@ -221,6 +221,19 @@ def session_metrics(row: Mapping[str, str]) -> dict[str, float]:
     return out
 
 
+def orden(sesion: Sesion) -> tuple[dt.date, str]:
+    """The corpus's chronological order.
+
+    Keyed on (fecha, ejercicio) rather than the date alone so two sessions on
+    one day order the same way on every run — determinism is a stated
+    acceptance criterion, and CSV row order is not a contract. Everything that
+    needs "before" and "after" sorts by this and then works in *positions*:
+    a date is not a unique key here, so date comparisons cannot separate two
+    sessions recorded on one day.
+    """
+    return (sesion.fecha, sesion.ejercicio)
+
+
 def select(
     sesiones: Iterable[Sesion],
     *,
@@ -236,10 +249,7 @@ def select(
         and (hasta is None or s.fecha <= hasta)
         and (ejercicio is None or s.ejercicio == ejercicio)
     ]
-    # Sorted on (fecha, ejercicio) rather than fecha alone so two sessions on
-    # one day order the same way on every run — determinism is a stated
-    # acceptance criterion, and CSV row order is not a contract.
-    return sorted(chosen, key=lambda s: (s.fecha, s.ejercicio))
+    return sorted(chosen, key=orden)
 
 
 def metric_trend(
@@ -366,17 +376,24 @@ def pattern_recurrence(
     and the availability check above already handles the one boundary that
     genuinely breaks comparability.
     """
-    examinadas = [s for s in sesiones if s.examinada]
-    apariciones: dict[PatternId, list[tuple[dt.date, int]]] = {}
-    for s in examinadas:
+    # Sorted here as well as in `select`, because everything below indexes into
+    # this list and being handed it out of order would silently invert "since".
+    examinadas = sorted((s for s in sesiones if s.examinada), key=orden)
+    apariciones: dict[PatternId, list[tuple[int, int]]] = {}
+    for i, s in enumerate(examinadas):
         for pattern_id, instancias in (s.patrones or {}).items():
-            apariciones.setdefault(pattern_id, []).append((s.fecha, instancias))
+            apariciones.setdefault(pattern_id, []).append((i, instancias))
 
     recurrencias: list[PatronRecurrencia] = []
     for pattern_id, hits in apariciones.items():
-        fechas = [f for f, _ in hits]
-        ultima = max(fechas)
-        posteriores = [s for s in examinadas if s.fecha > ultima]
+        indices = [i for i, _ in hits]
+        ultimo = max(indices)
+        # Position, not date. Two sessions can share a day, and `fecha > ultima`
+        # would drop every same-day session recorded after the appearance — a
+        # fault seen in the morning's monólogo and absent from that afternoon's
+        # narración would count as zero sessions gone by, so the absence
+        # threshold could be reached late or never.
+        posteriores = examinadas[ultimo + 1 :]
         concluyentes = sum(
             1 for s in posteriores if absence_is_conclusive(s, pattern_id)
         )
@@ -395,8 +412,8 @@ def pattern_recurrence(
                 tipo_habitual=patron.tipo_habitual,
                 sesiones_n=len(hits),
                 instancias_n=sum(n for _, n in hits),
-                primera=min(fechas),
-                ultima=ultima,
+                primera=examinadas[min(indices)].fecha,
+                ultima=examinadas[ultimo].fecha,
                 sesiones_desde_ultima=len(posteriores),
                 ausencias_concluyentes=concluyentes,
                 estado=estado,

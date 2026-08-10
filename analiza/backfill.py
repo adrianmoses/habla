@@ -179,11 +179,24 @@ def duplicate_ids(ids: list[PatternId]) -> list[PatternId]:
     return sorted({p for p in tracked if tracked.count(p) > 1})
 
 
+def _write_json(path: Path, payload: Any) -> None:
+    """Serialise atomically: a temp file alongside, then replace.
+
+    The stored examiner artifact is the durable corpus — `analiza` spec §2C's
+    "reprocessing from persisted raw JSON" has nothing left to reprocess if a
+    full disk truncates one in place.
+    """
+    tmp = path.with_name(f"{path.name}.tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2))
+    tmp.replace(path)  # same directory, so the swap is atomic
+
+
 def backfill_file(
     path: Path, config: Config, *, dry_run: bool, today: dt.date
 ) -> FileOutcome:
     """Assign pattern_id in place. Never partially writes: the payload is fully
-    assigned in memory before either file is touched."""
+    assigned in memory before either file is touched, each file is replaced
+    atomically, and the marker is written before what it marks."""
     try:
         payload = json.loads(path.read_text())
     except (OSError, json.JSONDecodeError) as e:
@@ -205,29 +218,44 @@ def backfill_file(
 
     for row, pattern_id in zip(errores, ids, strict=True):
         row["pattern_id"] = pattern_id
+
+    # The sidecar is written FIRST, and the ordering is load-bearing rather
+    # than stylistic. progreso reads a backfilled session's silence about a
+    # pattern as inconclusive — assignment saw the finding prose, not the
+    # transcript — and it decides that from this file merely *existing*.
+    #
+    # Ids first would mean a failed sidecar leaves a session that every later
+    # run skips (every row already has an id) and that progreso then reads as
+    # native evidence: the weakest assignments in the corpus silently promoted
+    # to the strongest, which is exactly the confusion the sidecar exists to
+    # prevent. This way round the worst case is a marker for rows that were
+    # never assigned — they still carry no pattern_id, so the session stays
+    # inconclusive and `needs_backfill` sends the next run at it again.
     try:
-        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2))
-        (path.parent / "backfill.json").write_text(
-            json.dumps(
-                {
-                    "backfill_version": BACKFILL_VERSION,
-                    "fecha": today.isoformat(),
-                    "model": config.llm_model,
-                    # Non-empty means at least one id here is mis-keyed and the
-                    # retry did not resolve it. Recorded rather than hidden so
-                    # WS2 can discount the session and a human can review it.
-                    "duplicados": duplicate_ids(ids),
-                    "asignaciones": [
-                        {"patron": row.get("patron", ""), "pattern_id": pid}
-                        for row, pid in zip(errores, ids, strict=True)
-                    ],
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
+        _write_json(
+            path.parent / "backfill.json",
+            {
+                "backfill_version": BACKFILL_VERSION,
+                "fecha": today.isoformat(),
+                "model": config.llm_model,
+                # Non-empty means at least one id here is mis-keyed and the
+                # retry did not resolve it. Recorded rather than hidden so
+                # WS2 can discount the session and a human can review it.
+                "duplicados": duplicate_ids(ids),
+                "asignaciones": [
+                    {"patron": row.get("patron", ""), "pattern_id": pid}
+                    for row, pid in zip(errores, ids, strict=True)
+                ],
+            },
         )
     except OSError as e:
-        return FileOutcome(path, "failed", f"write failed: {e}")
+        return FileOutcome(path, "failed", f"sidecar write failed: {e}")
+    try:
+        _write_json(path, payload)
+    except OSError as e:
+        return FileOutcome(
+            path, "failed", f"write failed: {e} (sidecar left; rerun to finish)"
+        )
     return FileOutcome(path, "assigned", "", len(ids))
 
 
