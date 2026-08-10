@@ -17,6 +17,29 @@ class Thresholds(BaseModel):
     warn_duration_s: float = 600.0  # warn above 10 min
 
 
+class ProgresoThresholds(BaseModel):
+    """Progress-report gates (spec 034). Defaults are the approved proposals;
+    calibration is deferred until ≥10 sessions exist, so every one is
+    overridable rather than tuned against a corpus of one."""
+
+    # Fixed first-N vs last-N (OQ4). Fixed, not first-third/last-third: a
+    # proportional window silently changes meaning as history grows, so two
+    # reports a month apart would not compare like with like.
+    ventana_n: int = 5
+    # Consecutive sessions a pattern must be *conclusively* absent from before
+    # it reads as gone (OQ2). Rendered as "ausente desde hace N sesiones",
+    # never as a verdict — calling a fault fixed is the learner's call.
+    ausencia_n: int = 3
+    # Below this, no narrative (OQ3). A confident story fitted to five
+    # sessions is worse than no story.
+    min_sesiones: int = 8
+    # vad_transcript_gap_s / duration_s above this flags the session
+    # low-confidence. A ratio rather than an absolute second count: with an
+    # absolute one a 20-minute session would have to be twice as broken as a
+    # 10-minute one to flag.
+    vad_gap_ratio: float = 0.10
+
+
 class Config(BaseModel):
     # Optional. When set, outputs use the Obsidian vault layout (nested under
     # Español/); it takes precedence over output_dir. With neither set,
@@ -31,6 +54,7 @@ class Config(BaseModel):
     connector_list_path: Path | None = None
     copy_source_audio: bool = False
     thresholds: Thresholds = Field(default_factory=Thresholds)
+    progreso: ProgresoThresholds = Field(default_factory=ProgresoThresholds)
 
 
 def load_config(path: Path = CONFIG_PATH) -> Config:

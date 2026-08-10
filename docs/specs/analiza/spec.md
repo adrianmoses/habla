@@ -10,6 +10,7 @@ Design principle: **deterministic layer for trends, LLM layer for judgment.** Me
 
 ```
 analiza sesion AUDIO [options]     analyze one recording
+analiza progreso [options]         report progress across stored sessions
 analiza backfill-patrones [opts]   assign pattern_id to stored sessions
 
 Arguments:
@@ -26,13 +27,20 @@ Options (sesion):
   --dry-run                print note to stdout, write nothing
   --lang TEXT              force language                 [default: es]
 
+Options (progreso):
+  --desde / --hasta DATE   inclusive range (YYYY-MM-DD)    [default: all]
+  --ejercicio TEXT         filter to one exercise
+  --out / --vault PATH     same resolution as sesion
+  --no-llm                 aggregation and numbers-only note
+  --dry-run                print note to stdout, write nothing
+
 Options (backfill-patrones):
   --out / --vault PATH     same resolution as sesion
   --dry-run                report assignments, write nothing
 
 Config: ~/.config/analiza/config.toml
   vault_path, output_dir, whisper_model, llm_provider/model/key env var name,
-  connector list path, thresholds (overridable per run)
+  connector list path, thresholds, progreso gates (overridable per run)
 ```
 
 **Subcommands since spec 034.** The analysis run was `analiza AUDIO` through
@@ -40,7 +48,7 @@ v0.x; it is now `analiza sesion AUDIO`. A bare-audio default cannot coexist
 with the `backfill-patrones` / `progreso` subcommands the progress work adds —
 `analiza progreso` would be ambiguous with a recording named `progreso`.
 
-Exit codes: 0 ok · 1 transcription failed · 2 audio unreadable · 3 output write failed · 4 LLM failed (note still written, feedback section marked pending).
+Exit codes: 0 ok · 1 transcription failed · 2 audio unreadable · 3 output write failed · 4 LLM failed (note still written, feedback section marked pending) · 5 no corpus to report on (`progreso` only).
 
 **Output destination.** The Obsidian vault is one *layout*, not a prerequisite — analiza runs with nothing configured. Precedence: `--vault` > config `vault_path` > `--out` > config `output_dir` > `./analiza-out`. A vault from either source also selects the nested `Español/` layout; every other destination is flat. Only `note.output_base` knows the difference, so the writers below it are layout-agnostic.
 
@@ -119,11 +127,13 @@ Paths below are shown relative to the resolved base (`{vault}/Español` for a va
    - Body: metrics summary block, examiner scores, a "Calcos" section (calques listed with every instance quoted, so they are not buried among grammar rows), error table for the remaining types (pre-filled, vault table format), upgrade suggestions rendered as `frase :: contexto` bullets under "Chunks capturados" — so the weekly-review promotion flow applies unchanged.
    - Collision: if the file exists, append ` (2)`.
 2. **Stats row** → `{base}/analiza-stats.csv`
-   - `date, ejercicio, tema, duration_s, wpm_gross, wpm_articulation, pauses_n, pause_max_s, fillers_per_min, connectors_unique, formal_ratio, mtld, errors_n, calcos_n, score_total, whisper_model, prompt_version`
+   - `date, ejercicio, tema, duration_s, wpm_gross, wpm_articulation, pauses_n, pause_max_s, fillers_per_min, connectors_unique, formal_ratio, mtld, errors_n, calcos_n, score_total, whisper_model, prompt_version, vocab_version`
    - `errors_n` and `calcos_n` count **patterns**, not occurrences, from `examiner_v2` on; under `v1` `errors_n` counted rows. Filter on `prompt_version` before trending across that boundary.
-   - `whisper_model` and `prompt_version` are the provenance pair. Metrics derived from word probabilities (`fillers_n`, `low_conf_spans`) move with the whisper model, and LLM columns move with the prompt; neither is comparable across a change in its own column, so both are recorded per row.
-   - Append-only; this is the 90-day trend line. Never contains LLM prose, only numbers.
+   - `whisper_model`, `prompt_version` and `vocab_version` are the provenance trio. Metrics derived from word probabilities (`fillers_n`, `low_conf_spans`) move with the whisper model, LLM columns move with the prompt, and which `pattern_id`s a session could possibly have reported moves with the vocabulary; nothing is comparable across a change in its own column, so all three are recorded per row.
+   - Append-only, and columns are appended too: a CSV written before a column existed is widened in place on the next append (old rows get empty cells), because `DictWriter` writes by fieldname and a row wider than its own header misaligns every reader.
+   - This is the 90-day trend line. Never contains LLM prose, only numbers.
 3. **Raw artifacts** → `{base}/analiza-raw/YYYY-MM-DD-{ejercicio}/`: source audio copy (optional, config), whisper JSON, metrics JSON, LLM response JSON.
+4. **Progress report** (`analiza progreso`, [spec 034](../034-analiza-progreso/spec.md)) → note at `{base}/Progreso/YYYY-MM-DD progreso.md`, aggregation at `{base}/analiza-raw/progreso-YYYY-MM-DD/stats.json`. Reads the CSV and the stored artifacts; appends nothing to the CSV.
 
 ## 3. Module layout
 
@@ -136,13 +146,17 @@ analiza/
   metrics.py        # pure functions, no I/O — unit-test target
   connectors.py     # matching engine over conectores_b2.py data
   examiner.py       # prompt build, LLM call, schema validation, retry
+  patrones_b2.py    # pattern_id vocabulary + versions — the tracking key
+  backfill.py       # retroactive pattern_id assignment over stored sessions
+  progreso.py       # pure functions, no I/O — aggregation across sessions
+  historial.py      # reads the stored corpus back (the I/O side of progreso)
   note.py           # obsidian note + csv rendering
   config.py
-  prompts/examiner_v1.md, examiner_v2.md          # superseded versions kept
-  schemas/output_schema_v1.json, output_schema_v2.json
+  prompts/examiner_v1.md, examiner_v2.md, examiner_v3.md   # superseded kept
+  schemas/output_schema_v1.json, _v2.json, _v3.json
 ```
 
-`metrics.py` and `connectors.py` take plain data structures and return plain data structures — fully testable without audio. Test fixtures: 3–4 hand-annotated short recordings (one clean, one filler-heavy, one with long pauses, one mumbled) with expected metric ranges.
+`metrics.py`, `connectors.py` and `progreso.py` take plain data structures and return plain data structures — fully testable without audio. Test fixtures: 3–4 hand-annotated short recordings (one clean, one filler-heavy, one with long pauses, one mumbled) with expected metric ranges.
 
 ## 4. Dependencies
 
@@ -153,7 +167,8 @@ analiza/
 - Whisper silently corrects some learner errors → error table is a lower bound; periodically spot-check transcript vs audio.
 - Filler counts are floors (suppression) → trend direction is meaningful, absolute value is not.
 - Pronunciation is out of scope for v0.x → see v2.
-- Scores from different `prompt_version`s are not comparable → CSV records the version; trend analysis should filter on it.
+- Scores from different `prompt_version`s are not comparable → CSV records the version; `analiza progreso` segments on it rather than trending across it.
+- The examiner reports at most 10 error patterns and the cap binds in practice → a fault missing from a session may have ranked 11th, so `progreso` treats a capped session as truncated and never reads its silence as progress.
 
 ## 6. Later (explicitly not v0.1)
 

@@ -1,7 +1,8 @@
 """CLI (spec §1): arg parsing, pipeline orchestration, exit codes.
 
 Exit codes: 0 ok · 1 transcription failed · 2 audio unreadable ·
-3 output write failed · 4 LLM failed (note still written, feedback pending).
+3 output write failed · 4 LLM failed (note still written, feedback pending) ·
+5 no corpus to report on.
 """
 
 import datetime as dt
@@ -19,19 +20,23 @@ from analiza import (
     backfill,
     connectors,
     examiner,
+    historial,
     metrics,
     note,
+    progreso,
     transcribe,
     vad,
 )
 from analiza import config as config_mod
 from analiza.conectores_b2 import CONECTORES
 from analiza.examiner import PROMPT_VERSION
+from analiza.patrones_b2 import VOCAB_VERSION
 
 EXIT_TRANSCRIPTION_FAILED = 1
 EXIT_AUDIO_UNREADABLE = 2
 EXIT_OUTPUT_WRITE_FAILED = 3
 EXIT_LLM_FAILED = 4
+EXIT_NO_CORPUS = 5
 
 def _lemmatize(text: str) -> list[str]:
     """spaCy es_core_news_sm lemmas of alphabetic tokens; degrades to empty
@@ -103,6 +108,11 @@ def _stats_row(
         ),
         "whisper_model": whisper_model,
         "prompt_version": PROMPT_VERSION,
+        # Empty when no examiner ran: no pattern_ids were assigned, so no
+        # vocabulary was in play. Recording the current version anyway would
+        # tell progreso the session could have reported ids that it never had
+        # the chance to.
+        "vocab_version": VOCAB_VERSION if examiner_result is not None else "",
     }
 
 
@@ -275,6 +285,106 @@ def sesion(
 
     if llm_failed:
         raise typer.Exit(EXIT_LLM_FAILED)
+
+
+def _fecha(valor: str | None, campo: str) -> dt.date | None:
+    if valor is None:
+        return None
+    try:
+        return dt.date.fromisoformat(valor)
+    except ValueError as e:
+        raise typer.BadParameter(
+            f"--{campo}: {valor!r} no es una fecha ISO (YYYY-MM-DD)"
+        ) from e
+
+
+@app.command("progreso")
+def progreso_cmd(
+    desde: Annotated[
+        str | None, typer.Option(help="fecha inicial inclusive (YYYY-MM-DD)")
+    ] = None,
+    hasta: Annotated[
+        str | None, typer.Option(help="fecha final inclusive (YYYY-MM-DD)")
+    ] = None,
+    ejercicio: Annotated[
+        str | None, typer.Option(help="filtrar por ejercicio (monologo | narrar-dia)")
+    ] = None,
+    vault: Annotated[
+        Path | None,
+        typer.Option(help="Obsidian vault root; reads under {vault}/Español/"),
+    ] = None,
+    out: Annotated[
+        Path | None,
+        typer.Option(help=f"plain output dir (default: ./{note.DEFAULT_OUTPUT_DIR})"),
+    ] = None,
+    no_llm: Annotated[
+        bool, typer.Option("--no-llm", help="solo agregación y nota numérica")
+    ] = False,
+    dry_run: Annotated[
+        bool, typer.Option("--dry-run", help="print note to stdout, write nothing")
+    ] = False,
+) -> None:
+    """Report progress across stored sessions: metric trends and which error
+    patterns keep coming back.
+
+    Reads analiza-stats.csv plus the stored examiner artifacts — no audio, no
+    re-transcription. The aggregation is deterministic and always written;
+    below the configured minimum session count the narrative is declined and
+    the numbers stand alone."""
+    cfg = config_mod.load_config()
+    base = _resolve_base(vault, out, cfg)
+
+    try:
+        sesiones, avisos = historial.load_sesiones(base)
+    except historial.HistorialError as e:
+        typer.echo(f"error: {e}", err=True)
+        raise typer.Exit(EXIT_NO_CORPUS) from e
+
+    hoy = dt.date.today()
+    stats = progreso.aggregate(
+        sesiones,
+        hoy=hoy,
+        parametros=cfg.progreso,
+        desde=_fecha(desde, "desde"),
+        hasta=_fecha(hasta, "hasta"),
+        ejercicio=ejercicio,
+        advertencias=avisos,
+    )
+    if stats.sesiones_n == 0:
+        typer.echo("no hay sesiones en el rango")
+        raise typer.Exit(EXIT_NO_CORPUS)
+
+    # WS3 fills this in; until then every run is effectively --no-llm.
+    narrativa: str | None = None
+    if not no_llm and stats.narrativa:
+        typer.echo(
+            "note: el pase narrativo (WS3) aún no está implementado; "
+            "se escribe la nota numérica",
+            err=True,
+        )
+
+    note_md = note.render_progreso_note(stats, narrativa)
+    if dry_run:
+        typer.echo(note_md)
+        return
+
+    try:
+        raw = note.progreso_raw_dir(base, hoy)
+        (raw / "stats.json").write_text(stats.model_dump_json(indent=2))
+        path = note.progreso_note_path(base, hoy)
+        note.write_note(path, note_md)
+    except (note.OutputWriteError, OSError) as e:
+        typer.echo(f"error: output write failed: {e}", err=True)
+        raise typer.Exit(EXIT_OUTPUT_WRITE_FAILED) from e
+
+    typer.echo(f"wrote {path}")
+    if not stats.narrativa:
+        typer.echo(
+            f"note: {progreso.plural(stats.sesiones_n, 'sesión', 'sesiones')}, "
+            f"por debajo del mínimo de {cfg.progreso.min_sesiones}: "
+            "agregación escrita, sin lectura",
+            err=True,
+        )
 
 
 @app.command("backfill-patrones")

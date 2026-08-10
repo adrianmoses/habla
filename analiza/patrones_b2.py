@@ -101,12 +101,36 @@ PatternId = Literal[
 ]
 
 
+# Vocabulary version, recorded per session in the stats CSV (spec 034 WS2).
+#
+# The vocabulary grows: running the WS1 backfill surfaced a fault no entry
+# covered (quantifiers and indefinites), and adding `cuantificadores-
+# indefinidos` fixed it. So a pattern missing from an older session may be
+# missing only because its id did not exist yet — the same comparability
+# hazard as `prompt_version` and `whisper_model`, and progreso must not read
+# that as the learner having fixed something.
+#
+# Bump this when adding entries, add the new version to VOCAB_VERSIONS, and
+# stamp the new entries with `desde=` it. Editing an existing entry's label or
+# examples needs no bump: the *id* is the contract.
+VOCAB_VERSION = "vocab_v1"
+
+# Chronological. Position is the ordering — never reorder, only append.
+VOCAB_VERSIONS: tuple[str, ...] = ("vocab_v1",)
+
+# What a session with no recorded vocab_version is treated as. Not a guess:
+# such a session was examined before versioning existed, so it necessarily
+# predates every id added afterwards.
+VOCAB_BASELINE = VOCAB_VERSIONS[0]
+
+
 @dataclass(frozen=True)
 class Patron:
     id: PatternId
     etiqueta: str  # short Spanish label, shown to the model and in notes
     tipo_habitual: Tipo  # the type this usually gets; NOT part of the key
     ejemplos: tuple[str, ...]  # concrete wrong forms, to anchor the choice
+    desde: str = VOCAB_BASELINE  # vocabulary version that introduced this id
 
 
 PATRONES: list[Patron] = [
@@ -446,3 +470,24 @@ PATRONES: list[Patron] = [
 PATRON_IDS: tuple[PatternId, ...] = tuple(p.id for p in PATRONES)
 
 PATRONES_POR_ID: dict[PatternId, Patron] = {p.id: p for p in PATRONES}
+
+
+def version_index(vocab_version: str | None) -> int:
+    """Position of a vocabulary version in VOCAB_VERSIONS.
+
+    An unrecognised version reads as the baseline rather than the newest: it
+    is either a pre-versioning session or one written by a build this one does
+    not know, and in both cases assuming *fewer* ids existed only ever makes
+    progreso more cautious about absence.
+    """
+    if vocab_version in VOCAB_VERSIONS:
+        return VOCAB_VERSIONS.index(vocab_version)
+    return 0
+
+
+def ids_disponibles(vocab_version: str | None) -> frozenset[PatternId]:
+    """Ids that existed at `vocab_version` — the set a session examined then
+    could possibly have reported. Absence of anything outside it says nothing.
+    """
+    limit = version_index(vocab_version)
+    return frozenset(p.id for p in PATRONES if version_index(p.desde) <= limit)

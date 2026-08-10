@@ -28,6 +28,12 @@ PROMPT_VERSION = "examiner_v3"
 # current models).
 MAX_TOKENS = 16000
 
+# Error *patterns* per session. The cap binds in practice — three v3 runs over
+# one transcript all returned exactly 10 while ~12 real faults competed for the
+# slots (spec 034 §Validate) — which is why progreso treats a session at the
+# cap as truncated: a fault missing from it may simply have ranked 11th.
+MAX_PATRONES = 10
+
 Criterio = Literal["coherencia", "fluidez", "correccion", "alcance"]
 
 # Tipo and PatternId live in patrones_b2 (the vocabulary owns the taxonomy) and
@@ -80,7 +86,7 @@ class Mejora(BaseModel):
 class ExaminerResult(BaseModel):
     puntuaciones: list[Puntuacion] = Field(min_length=4, max_length=4)
     # 10 *patterns*, not 10 occurrences — see ErrorRow.
-    errores: list[ErrorRow] = Field(max_length=10)
+    errores: list[ErrorRow] = Field(max_length=MAX_PATRONES)
     subjuntivo: list[SubjuntivoCheck]
     mejoras: list[Mejora] = Field(min_length=2, max_length=3)
     enfoque_proxima_sesion: str

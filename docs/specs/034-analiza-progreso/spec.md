@@ -89,34 +89,37 @@ meaningful history accumulates, because every session recorded without a
 
 ### Acceptance Criteria
 
-- [ ] Every `ErrorRow` carries a `pattern_id` drawn from a curated vocabulary,
+- [x] Every `ErrorRow` carries a `pattern_id` drawn from a curated vocabulary,
       with `otro` as the escape hatch; `patron` remains as the human-readable
       label and is the only carrier of meaning when `pattern_id` is `otro`.
 - [ ] Re-running the examiner twice over one stored transcript yields the same
       `pattern_id` set for the faults both runs found — the instability
       demonstrated above is confined to `patron` prose and `tipo`.
-- [ ] A backfill command assigns `pattern_id` to every stored `examiner.json`
+      *Partial: 8 of 12 ids in all three spike runs, and the residual is the
+      10-pattern cap rather than the keying (§Validate). WS2 treats a capped
+      session as truncated instead of assuming this criterion holds.*
+- [x] A backfill command assigns `pattern_id` to every stored `examiner.json`
       that predates the vocabulary, in place, without re-transcribing.
-- [ ] `analiza progreso [--desde D] [--hasta D] [--ejercicio E]` reads
+- [x] `analiza progreso [--desde D] [--hasta D] [--ejercicio E]` reads
       `analiza-stats.csv` plus the `examiner.json` files in range and writes a
       progress note plus a machine-readable aggregation JSON.
-- [ ] The aggregation is computed by pure functions with no LLM involvement and
+- [x] The aggregation is computed by pure functions with no LLM involvement and
       is byte-identical across repeated runs over the same inputs.
-- [ ] Per-pattern recurrence reports, for each `pattern_id` seen: sessions
+- [x] Per-pattern recurrence reports, for each `pattern_id` seen: sessions
       appeared in, first seen, last seen, total instances, and a
       resolved/persistent classification.
-- [ ] Metric trends compare a first window against a last window rather than
+- [x] Metric trends compare a first window against a last window rather than
       fitting a line, and each is reported with the session count behind it.
-- [ ] Sessions are segmented by `prompt_version` and `whisper_model`; a range
+- [x] Sessions are segmented by `prompt_version` and `whisper_model`; a range
       spanning a boundary is reported per-segment and never as one trend.
-- [ ] Sessions whose `vad_transcript_gap_s` exceeds a configurable threshold are
+- [x] Sessions whose `vad_transcript_gap_s` exceeds a configurable threshold are
       flagged low-confidence in both the aggregation and the note.
-- [ ] Below a configurable minimum session count the command declines to produce
+- [x] Below a configurable minimum session count the command declines to produce
       a narrative, states the count, and still writes the aggregation JSON.
-- [ ] `--no-llm` produces the aggregation and a numbers-only note.
+- [x] `--no-llm` produces the aggregation and a numbers-only note.
 - [ ] The LLM pass receives the aggregation JSON, never raw transcripts, and
       returns a structured result validated against a pydantic model.
-- [ ] No LLM prose is written to `analiza-stats.csv`.
+- [x] No LLM prose is written to `analiza-stats.csv`.
 - [ ] The progress prompt is a versioned asset with its version recorded in the
       output, following the examiner convention.
 
@@ -216,6 +219,37 @@ Segmentation is the load-bearing part: `errors_n` changed meaning at v2 (rows �
 patterns) and `fillers_n` moves with `whisper_model`, so a range spanning either
 boundary is reported per segment with the boundary named.
 
+**As built (2026-08-10).** Five decisions the spec left to implementation:
+
+- **Vocabulary versioning took the predicted CSV shape.** `vocab_version` is
+  appended to `STATS_COLUMNS`, each `Patron` carries a `desde` version, and
+  `ids_disponibles(version)` answers what a given session could have reported.
+  A CSV written before the column is widened in place on the next append —
+  `DictWriter` writes by fieldname and never reads the file, so appending a
+  wider row to a narrower header would have silently misaligned every reader.
+- **Absence is conclusive only when the session could have spoken.** Four
+  disqualifiers, each a silence that means nothing: the session was never
+  examined, it filled the examiner's pattern cap, the id did not yet exist at
+  its vocabulary version, or its ids came from the backfill — which saw the
+  finding prose and not the transcript, so a mis-key there manufactures a
+  false absence as easily as a false presence. `estado` is therefore ternary:
+  `persistente` / `ausente` / `no-concluyente`.
+- **Recurrence spans segments; trends do not.** A `pattern_id` surviving a
+  prompt bump is the entire point of the vocabulary, and the availability
+  check above already covers the one boundary that genuinely breaks it.
+- **Low confidence is a *ratio*** (`vad_transcript_gap_s / duration_s`,
+  default 0.10), not an absolute second count: under an absolute threshold a
+  20-minute session would have to be twice as broken as a 10-minute one to
+  flag.
+- **Not everything numeric is trended.** `errors_n`/`calcos_n` are capped and
+  model-noisy (Key Decision 4), `pauses_n`/`connectors_unique` grow with
+  session length — pauses becomes a derived `pauses_per_min` and connector
+  variety is dropped — and `duration_s` describes the recording, not the
+  speaker.
+
+The read side lives in `analiza/historial.py` so `progreso.py` can stay pure
+and its tests can run without a corpus.
+
 **WS3 — Narrative pass (`progreso_v1.md`).**
 
 `run_progreso(stats, config)` mirrors `run_examiner`: `messages.parse` with a
@@ -314,6 +348,9 @@ until there is history.
    segmentation that refuses to read absence across a boundary where the id was
    unavailable. **A CSV column is the likely shape, which puts this in WS2's
    scope rather than WS1's.**
+
+   **Both consequences landed in WS2 (2026-08-10)**, as the `vocab_version`
+   column and the four-way conclusiveness test — see *Approach → As built*.
 2. **Backfill dry run** over the stored corpus, hand-checked, to confirm ids are
    assigned sensibly and `otro` is not a dumping ground.
 3. **Threshold calibration** deferred until ≥10 sessions exist. Ship the gates
