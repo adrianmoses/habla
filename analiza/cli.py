@@ -260,7 +260,9 @@ def sesion(
         raise typer.Exit(EXIT_LLM_FAILED if llm_failed else 0)
 
     try:
-        path = note.note_path(base, fecha, ejercicio)
+        # Reserved together so the note and its artifacts share an ordinal —
+        # three monólogos in one afternoon must not overwrite each other.
+        path, raw_path = note.reserve_session(base, fecha, ejercicio)
         note.write_note(path, note_md)
         note.append_stats_row(
             base,
@@ -268,7 +270,7 @@ def sesion(
                 fecha, ejercicio, tema, metrics_dict, examiner_result, whisper_model
             ),
         )
-        raw = note.raw_dir(base, fecha, ejercicio)
+        raw = note.make_raw_dir(raw_path)
         transcribe.persist_raw(transcription, raw / "whisper.json")
         (raw / "metrics.json").write_text(
             json.dumps(metrics_dict, ensure_ascii=False, indent=2)

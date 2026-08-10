@@ -388,9 +388,47 @@ def _free_path(directory: Path, stem: str) -> Path:
     return path
 
 
-def note_path(base: Path, fecha: dt.date, ejercicio: str) -> Path:
-    """{base}/Sesiones/YYYY-MM-DD {ejercicio}.md."""
-    return _free_path(base / "Sesiones", f"{fecha.isoformat()} {ejercicio}")
+def ordinal_suffix(n: int) -> str:
+    """"" for the first session of a (date, exercise), " (2)" for the next.
+
+    The first keeps the unsuffixed names, so nothing already on disk moves.
+    """
+    return "" if n == 1 else f" ({n})"
+
+
+def reserve_session(base: Path, fecha: dt.date, ejercicio: str) -> tuple[Path, Path]:
+    """The note path and raw directory for one run, allocated together.
+
+    Both carry the *same* ordinal, so a note and its artifacts always
+    correspond. Allocating them separately was a real defect: the raw
+    directory was keyed on `{fecha}-{ejercicio}` alone and reused on a
+    same-day repeat, so a second monólogo overwrote the first one's whisper,
+    metrics and examiner JSON. The note survived (it suffixed on collision),
+    which made the loss invisible — and progreso, which cannot tell which CSV
+    row the surviving artifacts belong to, then dropped the patterns for
+    *every* row of that day rather than risk inventing recurrence.
+
+    Three recordings in one afternoon is ordinary practice, not an edge case:
+    it costs a day of pattern history every time.
+    """
+    n = 1
+    while True:
+        suffix = ordinal_suffix(n)
+        note_p = base / "Sesiones" / f"{fecha.isoformat()} {ejercicio}{suffix}.md"
+        raw_p = base / "analiza-raw" / f"{fecha.isoformat()}-{ejercicio}{suffix}"
+        if not note_p.exists() and not raw_p.exists():
+            return note_p, raw_p
+        n += 1
+
+
+def make_raw_dir(path: Path) -> Path:
+    """Create a reserved raw directory. Holds whisper JSON, metrics JSON, LLM
+    response JSON, optional source-audio copy."""
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        raise OutputWriteError(f"failed creating {path}: {e}") from e
+    return path
 
 
 def progreso_note_path(base: Path, fecha: dt.date) -> Path:
@@ -476,12 +514,3 @@ def append_stats_row(base: Path, row: dict[str, object]) -> None:
         raise OutputWriteError(f"failed appending to {csv_path}: {e}") from e
 
 
-def raw_dir(base: Path, fecha: dt.date, ejercicio: str) -> Path:
-    """{base}/analiza-raw/YYYY-MM-DD-{ejercicio}/ — holds whisper JSON,
-    metrics JSON, LLM response JSON, optional source-audio copy."""
-    path = base / "analiza-raw" / f"{fecha.isoformat()}-{ejercicio}"
-    try:
-        path.mkdir(parents=True, exist_ok=True)
-    except OSError as e:
-        raise OutputWriteError(f"failed creating {path}: {e}") from e
-    return path

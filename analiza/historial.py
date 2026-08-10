@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from analiza.examiner import MAX_PATRONES
-from analiza.note import STATS_COLUMNS
+from analiza.note import STATS_COLUMNS, ordinal_suffix
 from analiza.patrones_b2 import PATRON_IDS, PatternId
 from analiza.progreso import Sesion, session_metrics
 
@@ -110,6 +110,16 @@ def _vad_gap_ratio(payload: Any) -> float | None:
     return round(gap / duration, 4)
 
 
+def _raw_path(base: Path, clave: tuple[str, str], n: int) -> Path:
+    """Where the nth session of a (date, exercise) keeps its artifacts.
+
+    Mirrors `note.reserve_session`; the two must agree, so the suffix format
+    lives in `note` and is read back through it.
+    """
+    fecha, ejercicio = clave
+    return base / "analiza-raw" / f"{fecha}-{ejercicio}{ordinal_suffix(n)}"
+
+
 def _sesion(row: dict[str, str], raw: Path | None) -> Sesion:
     """One CSV row joined with the artifacts in its raw directory."""
     fecha = dt.date.fromisoformat(row["date"])
@@ -149,12 +159,17 @@ def load_sesiones(base: Path) -> tuple[list[Sesion], list[str]]:
     not fail because one row has a hand-edited date, and it must not silently
     drop that row either.
 
-    The raw directory is keyed `{fecha}-{ejercicio}`, so two sessions of the
-    same exercise on one day resolve to one directory — and `note.raw_dir`
-    reuses it, meaning the artifacts on disk belong to whichever ran last.
-    Those rows are joined to no artifacts at all rather than to someone
-    else's: counting one session's patterns twice would invent recurrence,
-    which is the one thing this feature must never do.
+    Several sessions of one exercise on one day are told apart by ordinal: the
+    CSV is append-only, so the Nth such row is the Nth session that day, and
+    `note.reserve_session` gave it the matching `… (N)` directory.
+
+    Corpora recorded before that fix are why this is not a plain lookup. Back
+    then every same-day repeat wrote to *one* directory, so the artifacts
+    there belong to whichever ran last and nothing says which row produced
+    them. When a day's ordinal directories are not all present the whole group
+    is therefore joined to no artifacts at all, rather than to someone else's:
+    reading one session's patterns as another's would invent recurrence, which
+    is the one thing this feature must never do.
     """
     rows = read_stats_rows(base)
     sesiones: list[Sesion] = []
@@ -167,26 +182,36 @@ def load_sesiones(base: Path) -> tuple[list[Sesion], list[str]]:
             "sesiones se leen con el valor por defecto"
         )
 
-    dirs: dict[str, int] = {}
+    # Each row's ordinal within its (date, exercise) group, in CSV order.
+    ordinales: list[int] = []
+    total_por_clave: dict[tuple[str, str], int] = {}
     for row in rows:
-        nombre = f"{row.get('date', '')}-{row.get('ejercicio', '')}"
-        dirs[nombre] = dirs.get(nombre, 0) + 1
+        clave = (row.get("date", ""), row.get("ejercicio", ""))
+        total_por_clave[clave] = total_por_clave.get(clave, 0) + 1
+        ordinales.append(total_por_clave[clave])
 
-    for i, row in enumerate(rows, start=1):
+    for i, (row, n) in enumerate(zip(rows, ordinales, strict=True), start=1):
         if not row.get("date"):
             advertencias.append(f"fila {i} del CSV sin fecha: ignorada")
             continue
-        nombre = f"{row['date']}-{row.get('ejercicio', '')}"
-        raw = base / "analiza-raw" / nombre
-        compartida = dirs[nombre] > 1
-        if compartida:
+        clave = (row["date"], row.get("ejercicio", ""))
+        total = total_por_clave[clave]
+        raw = _raw_path(base, clave, n)
+        # A group is trustworthy only when every one of its directories is
+        # there. A legacy day has just the unsuffixed one, holding whichever
+        # run finished last, and no row may claim it.
+        ambigua = total > 1 and not all(
+            _raw_path(base, clave, k).is_dir() for k in range(1, total + 1)
+        )
+        if ambigua:
             advertencias.append(
-                f"{dirs[nombre]} sesiones comparten {nombre}/: se cuentan sus "
+                f"{total} sesiones de «{clave[1]}» el {clave[0]} sin directorio "
+                "propio (grabadas antes de que se separaran): se cuentan sus "
                 "métricas, no sus patrones"
             )
         try:
             sesiones.append(
-                _sesion(row, None if compartida or not raw.is_dir() else raw)
+                _sesion(row, None if ambigua or not raw.is_dir() else raw)
             )
         except ValueError as e:
             advertencias.append(f"fila {i} del CSV ilegible ({e}): ignorada")
