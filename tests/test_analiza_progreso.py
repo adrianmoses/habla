@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 from analiza import historial, note, patrones_b2, progreso
 from analiza.config import ProgresoThresholds
-from analiza.patrones_b2 import Patron
+from analiza.patrones_b2 import PATRONES_POR_ID, Patron
 from analiza.progreso import Sesion
 
 HOY = dt.date(2026, 9, 1)
@@ -536,7 +536,23 @@ def test_the_note_names_every_comparability_boundary() -> None:
 
 
 def test_the_note_carries_the_narrative_when_there_is_one() -> None:
+    from analiza.narrativa import PatronPrioritario, ProgresoResult
+
     stats = progreso.aggregate(serie([60.0] * 8), hoy=HOY, parametros=PARAMS)
-    nota = note.render_progreso_note(stats, "Vas mejor en fluidez.")
+    lectura = ProgresoResult(
+        lectura="Vas mejor en fluidez.",
+        patrones_prioritarios=[
+            PatronPrioritario(pattern_id="por-vs-para", por_que="6 instancias")
+        ],
+        cautelas=["Una sesión de baja confianza."],
+        enfoque_proxima_sesion="Drill por/para.",
+    )
+    nota = note.render_progreso_note(stats, lectura, "progreso_v1")
     assert "Vas mejor en fluidez." in nota
+    # The label is rendered from the vocabulary, not from the model's prose.
+    assert f"**{PATRONES_POR_ID['por-vs-para'].etiqueta}**" in nota
+    assert "`por-vs-para`" in nota
+    assert "Una sesión de baja confianza." in nota
+    assert "Drill por/para." in nota
+    assert "_progreso_version: progreso_v1_" in nota
     assert "por debajo del mínimo" not in nota

@@ -117,10 +117,10 @@ meaningful history accumulates, because every session recorded without a
 - [x] Below a configurable minimum session count the command declines to produce
       a narrative, states the count, and still writes the aggregation JSON.
 - [x] `--no-llm` produces the aggregation and a numbers-only note.
-- [ ] The LLM pass receives the aggregation JSON, never raw transcripts, and
+- [x] The LLM pass receives the aggregation JSON, never raw transcripts, and
       returns a structured result validated against a pydantic model.
 - [x] No LLM prose is written to `analiza-stats.csv`.
-- [ ] The progress prompt is a versioned asset with its version recorded in the
+- [x] The progress prompt is a versioned asset with its version recorded in the
       output, following the examiner convention.
 
 ### Non-Goals
@@ -265,6 +265,25 @@ applied to the new layer.
 Sizing is not a constraint: ~60 sessions of aggregated stats is far smaller than
 the ~30k tokens the raw `examiner.json` corpus would be, and that itself fits in
 one call.
+
+**As built (2026-08-10),** in `analiza/narrativa.py` — `progreso.py` declares
+itself pure, so the call cannot live there. `ProgresoResult` is structured
+rather than free prose: `lectura`, `patrones_prioritarios` (≤3, each a
+`pattern_id` plus a one-line reason), `cautelas`, `enfoque_proxima_sesion`.
+
+The shape is doing work. A single prose field would invite the model to recite
+numbers, and the moment it recites them they stop being reproducible — the
+separation this whole spec rests on. Citing faults by `pattern_id` rather than
+by description means the note renders each label from the vocabulary, so a
+tracked fault cannot be quietly renamed on its way to the page, and
+`uncited_patterns` fails a response that names an id the aggregation never
+recorded. The enum stops an id that does not exist; only the aggregation knows
+which ids *this learner* has produced, so that check is client-side and routes
+into the single retry. `cautelas` is a field rather than a hedge buried in the
+prose because it is the part a learner most needs to see.
+
+Below the minimum session count no call is made at all: declining to report is
+Key Decision 5, and it should not cost a request to decline.
 
 **Outputs**, following the existing layout (`note.output_base`, so vault and
 plain-dir layouts both work):
@@ -418,6 +437,24 @@ Per `OVERVIEW.md` §Testing Suite: pytest under `tests/`, ruff + mypy in CI's
 **Live validation** (not in CI, needs `ANTHROPIC_API_KEY`): the vocabulary
 stability spike from *Validate before proceeding*, and one end-to-end
 `analiza progreso` run once ≥8 sessions exist.
+
+**Prompt validation, 2026-08-10 — run against a synthetic 14-session corpus**
+(real history is one session, and the narrative gate is 8). The corpus was
+shaped so every state the prompt has a rule about actually occurs: a
+`prompt_version` frontera, one segment with a real trend and one too short for
+a window, a persistent fault, a conclusively absent one, a non-conclusive one,
+a low-confidence session, and two sessions at the pattern cap. The model
+named its segment when citing a trend, refused to compare across the
+frontera, wrote "insufficient, not stable", treated `no-concluyente` as *not*
+progress and `ausente` as an observation rather than a verdict, cited only ids
+present in the aggregation, and reproduced every number correctly. It also
+noticed unprompted that the faults appearing in only two sessions were the two
+capped ones.
+
+One defect, fixed by prompt rule 8: the first run leaked JSON field names into
+the prose (`sesiones_desde_ultima=0`). **This does not substitute for a run
+over real history** — a synthetic corpus cannot show whether the reading is
+*useful*, only whether it is honest.
 
 **Fixtures:** synthetic CSV rows and `examiner.json` payloads written in the
 test module, plus the one real stored session under `analiza-out/` for the

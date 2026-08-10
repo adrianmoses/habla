@@ -133,7 +133,7 @@ Paths below are shown relative to the resolved base (`{vault}/Español` for a va
    - Append-only, and columns are appended too: a CSV written before a column existed is widened in place on the next append (old rows get empty cells), because `DictWriter` writes by fieldname and a row wider than its own header misaligns every reader.
    - This is the 90-day trend line. Never contains LLM prose, only numbers.
 3. **Raw artifacts** → `{base}/analiza-raw/YYYY-MM-DD-{ejercicio}/`: source audio copy (optional, config), whisper JSON, metrics JSON, LLM response JSON.
-4. **Progress report** (`analiza progreso`, [spec 034](../034-analiza-progreso/spec.md)) → note at `{base}/Progreso/YYYY-MM-DD progreso.md`, aggregation at `{base}/analiza-raw/progreso-YYYY-MM-DD/stats.json`. Reads the CSV and the stored artifacts; appends nothing to the CSV.
+4. **Progress report** (`analiza progreso`, [spec 034](../034-analiza-progreso/spec.md)) → note at `{base}/Progreso/YYYY-MM-DD progreso.md`, aggregation at `{base}/analiza-raw/progreso-YYYY-MM-DD/stats.json`, and the LLM reading (with its `prompt_version`) at `progreso.json` beside it. Reads the CSV and the stored artifacts; appends nothing to the CSV. The reading is skipped entirely — no request made — below the configured minimum session count.
 
 ## 3. Module layout
 
@@ -150,10 +150,13 @@ analiza/
   backfill.py       # retroactive pattern_id assignment over stored sessions
   progreso.py       # pure functions, no I/O — aggregation across sessions
   historial.py      # reads the stored corpus back (the I/O side of progreso)
+  narrativa.py      # LLM reading of an aggregation (never of a transcript)
   note.py           # obsidian note + csv rendering
   config.py
   prompts/examiner_v1.md, examiner_v2.md, examiner_v3.md   # superseded kept
+  prompts/progreso_v1.md
   schemas/output_schema_v1.json, _v2.json, _v3.json
+  schemas/output_schema_progreso_v1.json
 ```
 
 `metrics.py`, `connectors.py` and `progreso.py` take plain data structures and return plain data structures — fully testable without audio. Test fixtures: 3–4 hand-annotated short recordings (one clean, one filler-heavy, one with long pauses, one mumbled) with expected metric ranges.

@@ -11,6 +11,8 @@ import datetime as dt
 from pathlib import Path
 
 from analiza.examiner import ExaminerResult
+from analiza.narrativa import ProgresoResult
+from analiza.patrones_b2 import PATRONES_POR_ID
 from analiza.progreso import (
     PatronRecurrencia,
     ProgresoStats,
@@ -227,7 +229,8 @@ def _tendencias_lines(tendencias: list[TendenciaMetrica], ventana_n: int) -> lis
 
 def render_progreso_note(
     stats: ProgresoStats,
-    narrativa: str | None = None,  # None → numbers only (--no-llm or gated)
+    lectura: ProgresoResult | None = None,  # None → numbers only
+    prompt_version: str | None = None,
 ) -> str:
     """Render the progress note: scope, per-segment trends, recurrence.
 
@@ -327,8 +330,31 @@ def render_progreso_note(
         lines.append("")
 
     lines += ["## Lectura", ""]
-    if narrativa is not None:
-        lines += [narrativa, ""]
+    if lectura is not None:
+        lines += [lectura.lectura, ""]
+        if lectura.patrones_prioritarios:
+            lines += ["**Prioridad ahora:**", ""]
+            lines += [
+                # The label comes from the vocabulary, not from the model's
+                # prose: a tracked fault must not be quietly renamed on its way
+                # to the page.
+                f"- **{PATRONES_POR_ID[p.pattern_id].etiqueta}** "
+                f"(`{p.pattern_id}`) — {p.por_que}"
+                if p.pattern_id in PATRONES_POR_ID
+                else f"- `{p.pattern_id}` — {p.por_que}"
+                for p in lectura.patrones_prioritarios
+            ]
+            lines.append("")
+        if lectura.cautelas:
+            lines += ["**Lo que estos datos no dicen:**", ""]
+            lines += [f"- {c}" for c in lectura.cautelas]
+            lines.append("")
+        lines += [
+            "**Enfoque próxima sesión:** " + lectura.enfoque_proxima_sesion,
+            "",
+        ]
+        if prompt_version:
+            lines += [f"_progreso_version: {prompt_version}_", ""]
     elif not stats.narrativa:
         lines += [
             f"_Sin lectura: {plural(stats.sesiones_n, 'sesión', 'sesiones')}, "

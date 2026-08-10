@@ -22,6 +22,7 @@ from analiza import (
     examiner,
     historial,
     metrics,
+    narrativa,
     note,
     progreso,
     transcribe,
@@ -354,23 +355,46 @@ def progreso_cmd(
         typer.echo("no hay sesiones en el rango")
         raise typer.Exit(EXIT_NO_CORPUS)
 
-    # WS3 fills this in; until then every run is effectively --no-llm.
-    narrativa: str | None = None
+    # No narrative below the gate, and no call either: declining to report is
+    # the feature (Key Decision 5), not something to pay a model to confirm.
+    lectura: narrativa.ProgresoResult | None = None
+    llm_failed = False
     if not no_llm and stats.narrativa:
-        typer.echo(
-            "note: el pase narrativo (WS3) aún no está implementado; "
-            "se escribe la nota numérica",
-            err=True,
-        )
+        try:
+            lectura = narrativa.run_progreso(stats, cfg)
+        except examiner.ExaminerError as e:
+            typer.echo(
+                f"warning: la lectura falló, la nota va solo con números: {e}",
+                err=True,
+            )
+            llm_failed = True
 
-    note_md = note.render_progreso_note(stats, narrativa)
+    note_md = note.render_progreso_note(
+        stats, lectura, narrativa.PROMPT_VERSION if lectura else None
+    )
     if dry_run:
         typer.echo(note_md)
-        return
+        raise typer.Exit(EXIT_LLM_FAILED if llm_failed else 0)
 
     try:
         raw = note.progreso_raw_dir(base, hoy)
         (raw / "stats.json").write_text(stats.model_dump_json(indent=2))
+        if lectura is not None:
+            # Envelope, like backfill.json: the prompt version has to travel
+            # with the prose, because a prompt change breaks comparability
+            # between two reports exactly as it does between two sessions.
+            (raw / "progreso.json").write_text(
+                json.dumps(
+                    {
+                        "prompt_version": narrativa.PROMPT_VERSION,
+                        "fecha": hoy.isoformat(),
+                        "model": cfg.llm_model,
+                        "lectura": lectura.model_dump(),
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
         path = note.progreso_note_path(base, hoy)
         note.write_note(path, note_md)
     except (note.OutputWriteError, OSError) as e:
@@ -378,6 +402,8 @@ def progreso_cmd(
         raise typer.Exit(EXIT_OUTPUT_WRITE_FAILED) from e
 
     typer.echo(f"wrote {path}")
+    if llm_failed:
+        raise typer.Exit(EXIT_LLM_FAILED)
     if not stats.narrativa:
         typer.echo(
             f"note: {progreso.plural(stats.sesiones_n, 'sesión', 'sesiones')}, "

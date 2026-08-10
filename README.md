@@ -280,7 +280,15 @@ first window against a last window instead of fitting a line; sessions are
 segmented by `(prompt_version, whisper_model)` so a trend never spans a change
 that redefined what it measures; a pattern's absence counts as evidence only
 when the session could have reported it and didn't; and below eight sessions
-(configurable) it writes the numbers and declines the story.
+(configurable) it writes the numbers and declines the story — without making a
+request, because declining shouldn't cost one.
+
+Counting is deterministic; the reading is not. The LLM pass gets the
+aggregation and never a transcript, and returns a structured result: what
+moved, at most three faults to work on next (cited by `pattern_id`, and a
+citation the aggregation never recorded fails the response), what the data
+can't say, and one focus for the next session. `--no-llm` stops at the
+numbers.
 
 Known limitations (spec §5): Whisper silently corrects some learner errors, so
 the examiner's error table is a lower bound; pronunciation is out of scope for
