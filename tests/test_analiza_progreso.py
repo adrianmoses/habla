@@ -649,3 +649,24 @@ def test_recurrence_sorts_sessions_it_is_handed_out_of_order() -> None:
     assert progreso.pattern_recurrence(
         barajadas, ausencia_n=3
     ) == progreso.pattern_recurrence(ordenadas, ausencia_n=3)
+
+
+def test_same_day_sessions_are_named_apart_in_the_report(tmp_path: Path) -> None:
+    """A flagged session has to be findable. Naming all three of an afternoon
+    "2026-08-01 monologo" tells the reader something is wrong and not which
+    recording it was; the key matches the note filename instead."""
+    _corpus(tmp_path, [CSV_ROW, {**CSV_ROW, "wpm_gross": "70"}])
+    for nombre in ("2026-08-01-monologo", "2026-08-01-monologo (2)"):
+        _raw(
+            tmp_path,
+            nombre,
+            examiner=EXAMINER_JSON,
+            metrics={"duration_s": 600.0, "vad_transcript_gap_s": 90.0},
+        )
+    sesiones, _ = historial.load_sesiones(tmp_path)
+    stats = progreso.aggregate(sesiones, hoy=HOY, parametros=PARAMS)
+
+    assert stats.baja_confianza == [
+        "2026-08-01 monologo",
+        "2026-08-01 monologo (2)",
+    ]

@@ -120,7 +120,7 @@ def _raw_path(base: Path, clave: tuple[str, str], n: int) -> Path:
     return base / "analiza-raw" / f"{fecha}-{ejercicio}{ordinal_suffix(n)}"
 
 
-def _sesion(row: dict[str, str], raw: Path | None) -> Sesion:
+def _sesion(row: dict[str, str], raw: Path | None, ordinal: int) -> Sesion:
     """One CSV row joined with the artifacts in its raw directory."""
     fecha = dt.date.fromisoformat(row["date"])
     patrones: dict[PatternId, int] | None = None
@@ -149,6 +149,7 @@ def _sesion(row: dict[str, str], raw: Path | None) -> Sesion:
         truncado=truncado,
         backfilled=backfilled,
         vad_gap_ratio=gap_ratio,
+        ordinal=ordinal,
     )
 
 
@@ -211,7 +212,7 @@ def load_sesiones(base: Path) -> tuple[list[Sesion], list[str]]:
             )
         try:
             sesiones.append(
-                _sesion(row, None if ambigua or not raw.is_dir() else raw)
+                _sesion(row, None if ambigua or not raw.is_dir() else raw, n)
             )
         except ValueError as e:
             advertencias.append(f"fila {i} del CSV ilegible ({e}): ignorada")
