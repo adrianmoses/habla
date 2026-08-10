@@ -476,14 +476,62 @@ def test_a_corrupt_examiner_file_costs_only_its_patterns(tmp_path: Path) -> None
     assert leida.metricas["wpm_gross"] == 60.0  # the CSV row still counts
 
 
-def test_two_sessions_sharing_a_raw_dir_contribute_no_patterns(tmp_path: Path) -> None:
-    """note.raw_dir reuses the directory, so the artifacts belong to whichever
-    ran last. Counting them for both rows would invent recurrence."""
+def test_same_day_sessions_are_joined_by_ordinal(tmp_path: Path) -> None:
+    """The CSV is append-only, so the Nth row of a (date, exercise) is the Nth
+    session that day and owns the matching `… (N)` directory."""
     _corpus(tmp_path, [CSV_ROW, {**CSV_ROW, "wpm_gross": "70"}])
     _raw(tmp_path, "2026-08-01-monologo", examiner=EXAMINER_JSON)
+    _raw(
+        tmp_path,
+        "2026-08-01-monologo (2)",
+        examiner={
+            "errores": [{"pattern_id": "concordancia-genero", "instancias": ["a"]}]
+        },
+    )
     sesiones, advertencias = historial.load_sesiones(tmp_path)
+
+    assert [s.patrones for s in sesiones] == [
+        {"por-vs-para": 2},
+        {"concordancia-genero": 1},
+    ]
+    assert [s.metricas["wpm_gross"] for s in sesiones] == [60.0, 70.0]
+    assert advertencias == []
+
+
+def test_a_legacy_shared_raw_dir_contributes_no_patterns(tmp_path: Path) -> None:
+    """Before sessions were separated, every same-day repeat wrote to one
+    directory, so the artifacts belong to whichever ran last and nothing says
+    which row produced them. Claiming them for either would invent recurrence
+    — the one thing this feature must never do."""
+    _corpus(tmp_path, [CSV_ROW, {**CSV_ROW, "wpm_gross": "70"}])
+    _raw(tmp_path, "2026-08-01-monologo", examiner=EXAMINER_JSON)  # no " (2)"
+    sesiones, advertencias = historial.load_sesiones(tmp_path)
+
     assert [s.patrones for s in sesiones] == [None, None]
-    assert any("comparten" in a for a in advertencias)
+    # The metrics are still real, and still counted.
+    assert [s.metricas["wpm_gross"] for s in sesiones] == [60.0, 70.0]
+    assert any("sin directorio propio" in a for a in advertencias)
+
+
+def test_different_exercises_on_one_day_do_not_collide(tmp_path: Path) -> None:
+    """The key is (date, exercise): a monólogo and a narración on one day were
+    never sharing a directory, so neither is ambiguous."""
+    _corpus(tmp_path, [CSV_ROW, {**CSV_ROW, "ejercicio": "narrar-dia"}])
+    _raw(tmp_path, "2026-08-01-monologo", examiner=EXAMINER_JSON)
+    _raw(
+        tmp_path,
+        "2026-08-01-narrar-dia",
+        examiner={
+            "errores": [{"pattern_id": "concordancia-genero", "instancias": ["a"]}]
+        },
+    )
+    sesiones, advertencias = historial.load_sesiones(tmp_path)
+
+    assert [s.patrones for s in sesiones] == [
+        {"por-vs-para": 2},
+        {"concordancia-genero": 1},
+    ]
+    assert advertencias == []
 
 
 def test_a_pre_column_csv_is_read_and_flagged(tmp_path: Path) -> None:
@@ -601,3 +649,24 @@ def test_recurrence_sorts_sessions_it_is_handed_out_of_order() -> None:
     assert progreso.pattern_recurrence(
         barajadas, ausencia_n=3
     ) == progreso.pattern_recurrence(ordenadas, ausencia_n=3)
+
+
+def test_same_day_sessions_are_named_apart_in_the_report(tmp_path: Path) -> None:
+    """A flagged session has to be findable. Naming all three of an afternoon
+    "2026-08-01 monologo" tells the reader something is wrong and not which
+    recording it was; the key matches the note filename instead."""
+    _corpus(tmp_path, [CSV_ROW, {**CSV_ROW, "wpm_gross": "70"}])
+    for nombre in ("2026-08-01-monologo", "2026-08-01-monologo (2)"):
+        _raw(
+            tmp_path,
+            nombre,
+            examiner=EXAMINER_JSON,
+            metrics={"duration_s": 600.0, "vad_transcript_gap_s": 90.0},
+        )
+    sesiones, _ = historial.load_sesiones(tmp_path)
+    stats = progreso.aggregate(sesiones, hoy=HOY, parametros=PARAMS)
+
+    assert stats.baja_confianza == [
+        "2026-08-01 monologo",
+        "2026-08-01 monologo (2)",
+    ]

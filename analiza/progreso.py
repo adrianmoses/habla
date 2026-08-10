@@ -95,11 +95,18 @@ class Sesion(BaseModel):
     truncado: bool = False  # examiner returned a full MAX_PATRONES rows
     backfilled: bool = False  # ids assigned retroactively, not natively
     vad_gap_ratio: float | None = None
+    # Which session of its (date, exercise) this is. A date is not a unique
+    # key — three monólogos in one afternoon is ordinary practice — so without
+    # this a report would flag "2026-08-10 monologo" and leave the reader
+    # unable to tell which of the three it meant.
+    ordinal: int = 1
 
     @property
     def clave(self) -> str:
-        """How a session is named anywhere it is listed."""
-        return f"{self.fecha.isoformat()} {self.ejercicio}"
+        """How a session is named anywhere it is listed. Matches its note
+        filename, so a flagged session can actually be opened."""
+        sufijo = "" if self.ordinal == 1 else f" ({self.ordinal})"
+        return f"{self.fecha.isoformat()} {self.ejercicio}{sufijo}"
 
     @property
     def examinada(self) -> bool:

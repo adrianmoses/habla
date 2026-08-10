@@ -149,28 +149,52 @@ def test_output_base_plain_layout_is_flat(tmp_path: Path) -> None:
     """No vault → the three artifacts hang directly off the output dir."""
     base = note.output_base(tmp_path, vault_layout=False)
     assert base == tmp_path
-    assert note.note_path(base, FECHA, "monologo") == (
-        tmp_path / "Sesiones" / "2026-07-19 monologo.md"
-    )
-    assert note.raw_dir(base, FECHA, "monologo") == (
-        tmp_path / "analiza-raw" / "2026-07-19-monologo"
-    )
+    nota, raw = note.reserve_session(base, FECHA, "monologo")
+    assert nota == tmp_path / "Sesiones" / "2026-07-19 monologo.md"
+    assert raw == tmp_path / "analiza-raw" / "2026-07-19-monologo"
     note.append_stats_row(base, _row())
     assert (tmp_path / "analiza-stats.csv").exists()
     assert "Español" not in str(base)
 
 
-def test_note_path_collision(tmp_path: Path) -> None:
+def test_a_second_session_that_day_gets_its_own_note_and_artifacts(
+    tmp_path: Path,
+) -> None:
+    """Three monólogos in one afternoon is ordinary practice. The raw
+    directory used to be keyed on (date, exercise) alone and reused, so each
+    run silently overwrote the previous one's examiner.json — and progreso,
+    unable to tell which CSV row the survivors belonged to, then dropped the
+    patterns for the whole day."""
     base = note.output_base(tmp_path, vault_layout=True)
-    first = note.note_path(base, FECHA, "monologo")
-    assert first == tmp_path / "Español" / "Sesiones" / "2026-07-19 monologo.md"
-    note.write_note(first, "x")
-    second = note.note_path(base, FECHA, "monologo")
-    assert second.name == "2026-07-19 monologo (2).md"
-    note.write_note(second, "x")
-    assert note.note_path(base, FECHA, "monologo").name == (
-        "2026-07-19 monologo (3).md"
-    )
+    espanol = tmp_path / "Español"
+
+    primera_nota, primer_raw = note.reserve_session(base, FECHA, "monologo")
+    assert primera_nota == espanol / "Sesiones" / "2026-07-19 monologo.md"
+    assert primer_raw == espanol / "analiza-raw" / "2026-07-19-monologo"
+    note.write_note(primera_nota, "x")
+    note.make_raw_dir(primer_raw)
+
+    segunda_nota, segundo_raw = note.reserve_session(base, FECHA, "monologo")
+    assert segunda_nota.name == "2026-07-19 monologo (2).md"
+    assert segundo_raw.name == "2026-07-19-monologo (2)"
+    note.write_note(segunda_nota, "x")
+    note.make_raw_dir(segundo_raw)
+
+    tercera_nota, tercer_raw = note.reserve_session(base, FECHA, "monologo")
+    assert tercera_nota.name == "2026-07-19 monologo (3).md"
+    assert tercer_raw.name == "2026-07-19-monologo (3)"
+
+
+def test_the_note_and_its_artifacts_share_an_ordinal(tmp_path: Path) -> None:
+    """Allocated together on purpose: a note whose ordinal disagrees with its
+    directory is a session pointing at someone else's evidence."""
+    base = note.output_base(tmp_path, vault_layout=True)
+    # Only the raw directory exists — a run that died before writing its note.
+    note.make_raw_dir(base / "analiza-raw" / "2026-07-19-monologo")
+
+    nota, raw = note.reserve_session(base, FECHA, "monologo")
+    assert nota.name == "2026-07-19 monologo (2).md"
+    assert raw.name == "2026-07-19-monologo (2)"
 
 
 def _row() -> dict[str, object]:
@@ -201,7 +225,8 @@ def test_append_stats_row_rejects_wrong_keys(tmp_path: Path) -> None:
 
 def test_raw_dir_created(tmp_path: Path) -> None:
     base = note.output_base(tmp_path, vault_layout=True)
-    raw = note.raw_dir(base, FECHA, "monologo")
+    _, reserved = note.reserve_session(base, FECHA, "monologo")
+    raw = note.make_raw_dir(reserved)
     assert raw == tmp_path / "Español" / "analiza-raw" / "2026-07-19-monologo"
     assert raw.is_dir()
 
