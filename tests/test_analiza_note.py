@@ -34,6 +34,7 @@ def examiner_result() -> ExaminerResult:
         ],
         errores=[
             ErrorRow(
+                pattern_id="calco-hacer-sentido",
                 tipo="calco",
                 patron="hacer sentido",
                 deberia_ser="tener sentido",
@@ -41,6 +42,7 @@ def examiner_result() -> ExaminerResult:
                 instancias=["eso no hace sentido", "no hace sentido para mí"],
             ),
             ErrorRow(
+                pattern_id="preposicion-lugar",
                 tipo="gramatica",
                 patron="régimen preposicional con verbos de movimiento",
                 deberia_ser="fui a casa",
@@ -101,6 +103,7 @@ def test_render_note_escapes_pipes_in_error_table() -> None:
     result = examiner_result()
     result.errores = [
         ErrorRow(
+            pattern_id="palabra-imprecisa",
             tipo="lexico", patron="a | b", deberia_ser="c", por_que="d\ne",
             instancias=["f | g"],
         )
@@ -178,6 +181,7 @@ def _row() -> dict[str, object]:
         "connectors_unique": 3, "formal_ratio": 0.33, "mtld": 42.0,
         "errors_n": 2, "calcos_n": 1, "score_total": 8,
         "whisper_model": "small", "prompt_version": "examiner_v2",
+        "vocab_version": "vocab_v1",
     }
 
 
@@ -200,3 +204,44 @@ def test_raw_dir_created(tmp_path: Path) -> None:
     raw = note.raw_dir(base, FECHA, "monologo")
     assert raw == tmp_path / "Español" / "analiza-raw" / "2026-07-19-monologo"
     assert raw.is_dir()
+
+
+def _legacy_csv(base: Path, columns: list[str]) -> Path:
+    """A stats CSV as an older build wrote it, before a column was appended."""
+    base.mkdir(parents=True, exist_ok=True)
+    path = base / "analiza-stats.csv"
+    row = _row()
+    path.write_text(
+        ",".join(columns)
+        + "\n"
+        + ",".join(str(row[c]) for c in columns)
+        + "\n"
+    )
+    return path
+
+
+def test_append_stats_row_widens_a_narrower_header(tmp_path: Path) -> None:
+    """A row wider than the file's header would misalign every reader, so the
+    header is brought up to the contract and old rows padded."""
+    older = note.STATS_COLUMNS[:-1]
+    path = _legacy_csv(tmp_path, older)
+
+    note.append_stats_row(tmp_path, _row())
+
+    lines = path.read_text().splitlines()
+    assert lines[0] == ",".join(note.STATS_COLUMNS)
+    # The pre-existing row keeps its values and gains an empty cell — "not
+    # recorded", which is exactly what it is.
+    assert lines[1].endswith(",")
+    assert len(lines[1].split(",")) == len(note.STATS_COLUMNS)
+    # The appended row carries the new column's value in the new column.
+    assert lines[2].split(",")[-1] == str(_row()["vocab_version"])
+    assert len(lines) == 3
+
+
+def test_append_stats_row_refuses_a_reordered_header(tmp_path: Path) -> None:
+    """Not version skew: rewriting it would relabel every value in the file."""
+    scrambled = list(reversed(note.STATS_COLUMNS))
+    _legacy_csv(tmp_path, scrambled)
+    with pytest.raises(note.OutputWriteError):
+        note.append_stats_row(tmp_path, _row())

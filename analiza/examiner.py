@@ -13,11 +13,12 @@ import json
 import os
 from typing import Literal
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, model_validator
 
 from analiza.config import Config
+from analiza.patrones_b2 import PATRONES, PatternId, Tipo
 
-PROMPT_VERSION = "examiner_v2"
+PROMPT_VERSION = "examiner_v3"
 
 # max_tokens caps thinking AND response text together, and the examiner models
 # think by default. At 4096 a 10-minute monólogo spent the entire budget
@@ -27,13 +28,17 @@ PROMPT_VERSION = "examiner_v2"
 # current models).
 MAX_TOKENS = 16000
 
+# Error *patterns* per session. The cap binds in practice — three v3 runs over
+# one transcript all returned exactly 10 while ~12 real faults competed for the
+# slots (spec 034 §Validate) — which is why progreso treats a session at the
+# cap as truncated: a fault missing from it may simply have ranked 11th.
+MAX_PATRONES = 10
+
 Criterio = Literal["coherencia", "fluidez", "correccion", "alcance"]
 
-# Error taxonomy. "calco" is the priority category — a structure translated
-# literally from English, often grammatical but unidiomatic. Loanwords
-# ("email", "random") are deliberately NOT a category: acceptance varies by
-# region and register, so flagging them is noise rather than a learner error.
-Tipo = Literal["calco", "gramatica", "lexico", "registro"]
+# Tipo and PatternId live in patrones_b2 (the vocabulary owns the taxonomy) and
+# are re-exported here so the output schema reads in one place.
+__all__ = ["ExaminerResult", "PatternId", "Tipo", "run_examiner"]
 
 
 class Puntuacion(BaseModel):
@@ -51,8 +56,13 @@ class ErrorRow(BaseModel):
     out five other error types.
     """
 
+    # The tracking key across sessions (spec 034). Enum-enforced by structured
+    # outputs. `tipo` is deliberately NOT the key: the same fault has been
+    # observed switching between `calco` and `gramatica` across two runs over
+    # one transcript, so it is a per-session label only.
+    pattern_id: PatternId
     tipo: Tipo
-    patron: str  # names the fault, e.g. "por vs para — causa frente a finalidad"
+    patron: str  # human-readable label; the only carrier of meaning when `otro`
     deberia_ser: str
     por_que: str
     # Every occurrence, verbatim from the transcript. Uncapped: len() is the
@@ -76,10 +86,28 @@ class Mejora(BaseModel):
 class ExaminerResult(BaseModel):
     puntuaciones: list[Puntuacion] = Field(min_length=4, max_length=4)
     # 10 *patterns*, not 10 occurrences — see ErrorRow.
-    errores: list[ErrorRow] = Field(max_length=10)
+    errores: list[ErrorRow] = Field(max_length=MAX_PATRONES)
     subjuntivo: list[SubjuntivoCheck]
     mejoras: list[Mejora] = Field(min_length=2, max_length=3)
     enfoque_proxima_sesion: str
+
+    @model_validator(mode="after")
+    def _pattern_ids_are_unique(self) -> "ExaminerResult":
+        """One row per fault is the whole premise of pattern grouping, so two
+        rows sharing an id means one of them is mis-keyed. Caught client-side
+        (the API cannot express this), which routes it into the single retry.
+
+        `otro` is exempt: it is a bucket, not a fault, so several unrelated
+        findings legitimately land there.
+        """
+        tracked = [e.pattern_id for e in self.errores if e.pattern_id != "otro"]
+        duplicates = sorted({p for p in tracked if tracked.count(p) > 1})
+        if duplicates:
+            raise ValueError(
+                f"pattern_id repeated across rows: {duplicates}. Each fault gets "
+                "one row; merge them or pick the id that fits each separately."
+            )
+        return self
 
     @property
     def calcos(self) -> list[ErrorRow]:
@@ -100,6 +128,17 @@ def load_prompt_template() -> str:
     return (
         importlib.resources.files("analiza") / "prompts" / f"{PROMPT_VERSION}.md"
     ).read_text()
+
+
+def render_vocabulario() -> str:
+    """The pattern vocabulary as the model sees it: id, label, wrong-form
+    examples. Rendered from patrones_b2 rather than duplicated in the prompt
+    asset, so the enum the API enforces and the list the model reads cannot
+    drift apart."""
+    return "\n".join(
+        f"- `{p.id}` — {p.etiqueta}. P. ej.: {'; '.join(p.ejemplos)}"
+        for p in PATRONES
+    )
 
 
 def build_prompt(
@@ -125,6 +164,7 @@ def build_prompt(
     )
     prompt = load_prompt_template()
     for placeholder, value in [
+        ("{vocabulario}", render_vocabulario()),
         ("{ejercicio}", ejercicio),
         ("{tema}", tema or "(sin tema)"),
         ("{metrics_json}", json.dumps(metrics, ensure_ascii=False)),

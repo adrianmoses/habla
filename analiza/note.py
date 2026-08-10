@@ -11,6 +11,14 @@ import datetime as dt
 from pathlib import Path
 
 from analiza.examiner import ExaminerResult
+from analiza.narrativa import ProgresoResult
+from analiza.patrones_b2 import PATRONES_POR_ID
+from analiza.progreso import (
+    PatronRecurrencia,
+    ProgresoStats,
+    TendenciaMetrica,
+    plural,
+)
 
 # Used when neither a vault nor an output dir is configured. Relative, so it
 # lands beside the invocation; .gitignore covers it at the repo root.
@@ -26,15 +34,17 @@ VAULT_SUBDIR = "Español"
 # i.e. roughly occurrences, under v1) — filter on prompt_version before
 # trending it across the boundary.
 #
-# whisper_model and prompt_version are the provenance pair: the deterministic
-# metrics derived from word probabilities (fillers_n, low_conf_spans) shift
-# with the whisper model, and LLM columns shift with the prompt. Neither is
-# comparable across a change in its own column, so both travel with the row.
+# whisper_model, prompt_version and vocab_version are the provenance trio: the
+# deterministic metrics derived from word probabilities (fillers_n,
+# low_conf_spans) shift with the whisper model, LLM columns shift with the
+# prompt, and which pattern_ids a session *could* have reported shifts with the
+# vocabulary. Nothing is comparable across a change in its own column, so all
+# three travel with the row.
 STATS_COLUMNS: list[str] = [
     "date", "ejercicio", "tema", "duration_s", "wpm_gross", "wpm_articulation",
     "pauses_n", "pause_max_s", "fillers_per_min", "connectors_unique",
     "formal_ratio", "mtld", "errors_n", "calcos_n", "score_total",
-    "whisper_model", "prompt_version",
+    "whisper_model", "prompt_version", "vocab_version",
 ]
 
 # Metric key → display label for the note's summary block.
@@ -171,6 +181,194 @@ def render_note(
     return "\n".join(lines)
 
 
+def _num(value: float) -> str:
+    """Trim a float so a table of means reads as numbers rather than noise."""
+    return f"{value:g}"
+
+
+def _estado_patron(p: PatronRecurrencia) -> str:
+    """The recurrence verdict as an *observation* (spec 034 OQ2).
+
+    Never "resuelto": the report says how long a fault has gone unseen and how
+    much of that silence is worth; deciding it is fixed is the learner's call.
+    """
+    if p.estado == "ausente":
+        return "sin aparecer en " + plural(
+            p.ausencias_concluyentes, "sesión", "sesiones"
+        )
+    if p.estado == "no-concluyente":
+        return (
+            "sin aparecer en "
+            + plural(p.sesiones_desde_ultima, "sesión", "sesiones")
+            + ", pero ninguna lo descarta"
+        )
+    if p.sesiones_desde_ultima == 0:
+        return "en la última sesión"
+    return "visto hace " + plural(p.sesiones_desde_ultima, "sesión", "sesiones")
+
+
+def _tendencias_lines(tendencias: list[TendenciaMetrica], ventana_n: int) -> list[str]:
+    lines = [
+        f"| métrica | primeras {ventana_n} | últimas {ventana_n} | Δ |",
+        "| --- | --- | --- | --- |",
+    ]
+    for t in tendencias:
+        if t.estado == "ok" and t.primeras and t.ultimas and t.delta is not None:
+            lines.append(
+                f"| {t.etiqueta} | {_num(t.primeras.media)} | "
+                f"{_num(t.ultimas.media)} | {t.delta:+g} |"
+            )
+        else:
+            lines.append(
+                f"| {t.etiqueta} | — | — | insuficiente "
+                f"({plural(t.sesiones_n, 'sesión', 'sesiones')}, "
+                f"faltan {t.faltan}) |"
+            )
+    return lines
+
+
+def render_progreso_note(
+    stats: ProgresoStats,
+    lectura: ProgresoResult | None = None,  # None → numbers only
+    prompt_version: str | None = None,
+) -> str:
+    """Render the progress note: scope, per-segment trends, recurrence.
+
+    Every number here comes from `stats` and nothing is recomputed — the note
+    is a view of the aggregation, so what the reader sees and what the model
+    (WS3) was given cannot drift apart.
+    """
+    p = stats.parametros
+    lines = [
+        "---",
+        "type: progreso",
+        f"fecha: {stats.generado.isoformat()}",
+        f"desde: {stats.primera.isoformat() if stats.primera else ''}",
+        f"hasta: {stats.ultima.isoformat() if stats.ultima else ''}",
+        f"sesiones: {stats.sesiones_n}",
+        "fuente: analiza",
+        "---",
+        "",
+        "## Alcance",
+        "",
+        f"- Sesiones: {stats.sesiones_n} (examinadas: {stats.examinadas_n})",
+        f"- Rango: {stats.primera.isoformat() if stats.primera else '—'} → "
+        f"{stats.ultima.isoformat() if stats.ultima else '—'}",
+        f"- Ejercicio: {stats.ejercicio or '(todos)'}",
+        f"- Umbrales: ventana {p.ventana_n} · ausencia {p.ausencia_n} · "
+        f"mínimo para narrativa {p.min_sesiones} · "
+        f"hueco VAD {p.vad_gap_ratio:.0%}",
+        "",
+        "Las muletillas están subestimadas (Whisper las suprime): la cifra es "
+        "una cota inferior, solo la tendencia es significativa.",
+        "",
+        "## Tendencias",
+        "",
+    ]
+
+    if not stats.segmentos:
+        lines += ["_Sin sesiones en el rango._", ""]
+    for seg in stats.segmentos:
+        lines += [
+            f"### {seg.prompt_version or '(sin registrar)'} · whisper "
+            f"{seg.whisper_model or '(sin registrar)'}",
+            "",
+            f"{plural(seg.sesiones_n, 'sesión', 'sesiones')} · "
+            f"{seg.primera.isoformat()} → {seg.ultima.isoformat()}",
+            "",
+            *_tendencias_lines(seg.tendencias, p.ventana_n),
+            "",
+        ]
+
+    if stats.fronteras:
+        lines += [
+            "## Fronteras de comparabilidad",
+            "",
+            "Cada una parte la serie en dos: los números de un lado y del otro "
+            "nunca fueron comparables.",
+            "",
+            *[f"- {f}" for f in stats.fronteras],
+            "",
+        ]
+
+    lines += ["## Patrones", ""]
+    if stats.patrones:
+        lines += [
+            "| patrón | tipo | sesiones | instancias | primera | última | estado |",
+            "| --- | --- | --- | --- | --- | --- | --- |",
+        ]
+        lines += [
+            f"| {_cell(r.etiqueta)} | {r.tipo_habitual} | {r.sesiones_n} | "
+            f"{r.instancias_n} | {r.primera.isoformat()} | "
+            f"{r.ultima.isoformat()} | {_estado_patron(r)} |"
+            for r in stats.patrones
+        ]
+    else:
+        lines.append("_Ningún patrón registrado en el rango._")
+    lines.append("")
+    if stats.otros_n:
+        lines += [
+            f"{plural(stats.otros_n, 'hallazgo', 'hallazgos')} sin id del "
+            "vocabulario (`otro`): reales, pero fuera del seguimiento.",
+            "",
+        ]
+
+    if stats.baja_confianza:
+        lines += [
+            "## Sesiones de baja confianza",
+            "",
+            "Habla detectada por el VAD que apenas llegó a transcribirse: toda "
+            "métrica derivada de las palabras queda subestimada.",
+            "",
+            *[f"- {s}" for s in stats.baja_confianza],
+            "",
+        ]
+
+    if stats.advertencias:
+        lines += ["## Notas de lectura", ""]
+        lines += [f"- {a}" for a in stats.advertencias]
+        lines.append("")
+
+    lines += ["## Lectura", ""]
+    if lectura is not None:
+        lines += [lectura.lectura, ""]
+        if lectura.patrones_prioritarios:
+            lines += ["**Prioridad ahora:**", ""]
+            lines += [
+                # The label comes from the vocabulary, not from the model's
+                # prose: a tracked fault must not be quietly renamed on its way
+                # to the page.
+                f"- **{PATRONES_POR_ID[p.pattern_id].etiqueta}** "
+                f"(`{p.pattern_id}`) — {p.por_que}"
+                if p.pattern_id in PATRONES_POR_ID
+                else f"- `{p.pattern_id}` — {p.por_que}"
+                for p in lectura.patrones_prioritarios
+            ]
+            lines.append("")
+        if lectura.cautelas:
+            lines += ["**Lo que estos datos no dicen:**", ""]
+            lines += [f"- {c}" for c in lectura.cautelas]
+            lines.append("")
+        lines += [
+            "**Enfoque próxima sesión:** " + lectura.enfoque_proxima_sesion,
+            "",
+        ]
+        if prompt_version:
+            lines += [f"_progreso_version: {prompt_version}_", ""]
+    elif not stats.narrativa:
+        lines += [
+            f"_Sin lectura: {plural(stats.sesiones_n, 'sesión', 'sesiones')}, "
+            f"por debajo del mínimo de {p.min_sesiones}. Los números de arriba "
+            "son completos; lo que "
+            "se omite es la historia, que a esta escala sería una historia "
+            "inventada._",
+            "",
+        ]
+    else:
+        lines += ["_Pendiente: el pase LLM se omitió (--no-llm)._", ""]
+    return "\n".join(lines)
+
+
 def output_base(root: Path, *, vault_layout: bool) -> Path:
     """The directory the three artifacts hang off.
 
@@ -180,16 +378,35 @@ def output_base(root: Path, *, vault_layout: bool) -> Path:
     return root / VAULT_SUBDIR if vault_layout else root
 
 
-def note_path(base: Path, fecha: dt.date, ejercicio: str) -> Path:
-    """{base}/Sesiones/YYYY-MM-DD {ejercicio}.md, appending " (2)", " (3)", …
-    on collision."""
-    sesiones = base / "Sesiones"
-    stem = f"{fecha.isoformat()} {ejercicio}"
-    path = sesiones / f"{stem}.md"
+def _free_path(directory: Path, stem: str) -> Path:
+    """{directory}/{stem}.md, appending " (2)", " (3)", … on collision."""
+    path = directory / f"{stem}.md"
     n = 2
     while path.exists():
-        path = sesiones / f"{stem} ({n}).md"
+        path = directory / f"{stem} ({n}).md"
         n += 1
+    return path
+
+
+def note_path(base: Path, fecha: dt.date, ejercicio: str) -> Path:
+    """{base}/Sesiones/YYYY-MM-DD {ejercicio}.md."""
+    return _free_path(base / "Sesiones", f"{fecha.isoformat()} {ejercicio}")
+
+
+def progreso_note_path(base: Path, fecha: dt.date) -> Path:
+    """{base}/Progreso/YYYY-MM-DD progreso.md. Its own directory rather than
+    Sesiones/: a progress report is about the corpus, not a member of it."""
+    return _free_path(base / "Progreso", f"{fecha.isoformat()} progreso")
+
+
+def progreso_raw_dir(base: Path, fecha: dt.date) -> Path:
+    """{base}/analiza-raw/progreso-YYYY-MM-DD/ — holds the aggregation and,
+    once WS3 lands, the narrative response."""
+    path = base / "analiza-raw" / f"progreso-{fecha.isoformat()}"
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        raise OutputWriteError(f"failed creating {path}: {e}") from e
     return path
 
 
@@ -199,6 +416,41 @@ def write_note(path: Path, content: str) -> None:
         path.write_text(content)
     except OSError as e:
         raise OutputWriteError(f"failed writing {path}: {e}") from e
+
+
+def _widen_stats_header(csv_path: Path) -> None:
+    """Bring a CSV written before a column was appended up to the contract.
+
+    STATS_COLUMNS is append-only, so an older file's header is a *prefix* of
+    the current one. DictWriter writes by fieldname and never consults the
+    file, so appending a current row to an older file would produce data rows
+    wider than their own header — DictReader would quietly shunt the extra
+    values into its restkey and the new column would read as absent
+    everywhere. Widening the header (old rows get empty cells, which is what
+    they mean: not recorded) is the only non-destructive fix.
+
+    A header that is not a prefix is not version skew — it is a different file,
+    or one whose columns were reordered by hand. Refusing is correct: rewriting
+    it would silently relabel every value in it.
+    """
+    with csv_path.open(newline="") as f:
+        rows = list(csv.reader(f))
+    if not rows or rows[0] == STATS_COLUMNS:
+        return  # empty file: the header goes in on this append
+    header = rows[0]
+    if header != STATS_COLUMNS[: len(header)]:
+        raise OutputWriteError(
+            f"{csv_path} header {header} is not a prefix of the current "
+            f"contract {STATS_COLUMNS}; refusing to rewrite it"
+        )
+    tmp = csv_path.with_name(f"{csv_path.name}.tmp")
+    with tmp.open("w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(STATS_COLUMNS)
+        writer.writerows(
+            [*r, *[""] * (len(STATS_COLUMNS) - len(r))] for r in rows[1:]
+        )
+    tmp.replace(csv_path)  # same directory, so the swap is atomic
 
 
 def append_stats_row(base: Path, row: dict[str, object]) -> None:
@@ -213,6 +465,8 @@ def append_stats_row(base: Path, row: dict[str, object]) -> None:
     try:
         csv_path.parent.mkdir(parents=True, exist_ok=True)
         is_new = not csv_path.exists()
+        if not is_new:
+            _widen_stats_header(csv_path)
         with csv_path.open("a", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=STATS_COLUMNS)
             if is_new:

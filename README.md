@@ -212,8 +212,9 @@ uv sync --extra analiza
 # it arrives with the sync, no `spacy download` step needed.
 # ffmpeg must be on PATH; ANTHROPIC_API_KEY for the examiner pass
 
-uv run analiza grabacion.m4a --tema "mi fin de semana"
-uv run analiza grabacion.m4a --no-llm --dry-run   # metrics only, print to stdout
+uv run analiza sesion grabacion.m4a --tema "mi fin de semana"
+uv run analiza sesion grabacion.m4a --no-llm --dry-run  # metrics only, to stdout
+uv run analiza progreso --desde 2026-06-01              # read across sessions
 ```
 
 Transcription runs on the GPU when the CUDA runtime libs are present and falls
@@ -264,6 +265,30 @@ Word-level data (fillers, repeats, confidence) comes from faster-whisper with
 - `vad_transcript_gap_s` — speech time (per VAD) with no transcribed words.
   Usually suppressed fillers or mumbling; a data-quality signal, not a skill
   metric.
+
+### Progress across sessions
+
+`analiza progreso` reads the stats CSV and the stored `examiner.json` files —
+no audio, no re-transcription — and reports which error patterns keep coming
+back and which metrics moved. Recurrence is tracked by `pattern_id`, a curated
+vocabulary in `analiza/patrones_b2.py`, because the examiner's free-text
+`patron` prose is not stable enough to match a fault on across two runs of the
+same recording (spec [034](docs/specs/034-analiza-progreso/spec.md) §Why).
+
+Most of what the command does is decline to conclude things. Trends compare a
+first window against a last window instead of fitting a line; sessions are
+segmented by `(prompt_version, whisper_model)` so a trend never spans a change
+that redefined what it measures; a pattern's absence counts as evidence only
+when the session could have reported it and didn't; and below eight sessions
+(configurable) it writes the numbers and declines the story — without making a
+request, because declining shouldn't cost one.
+
+Counting is deterministic; the reading is not. The LLM pass gets the
+aggregation and never a transcript, and returns a structured result: what
+moved, at most three faults to work on next (cited by `pattern_id`, and a
+citation the aggregation never recorded fails the response), what the data
+can't say, and one focus for the next session. `--no-llm` stops at the
+numbers.
 
 Known limitations (spec §5): Whisper silently corrects some learner errors, so
 the examiner's error table is a lower bound; pronunciation is out of scope for

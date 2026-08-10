@@ -65,10 +65,10 @@ jobs:
       # targets (not a hand-maintained file list) so the job doesn't rot as
       # files are added/renamed/removed.
       - name: Ruff
-        run: uv run ruff check hable_ya/ api/ eval/agent/ tests/ scripts/
+        run: uv run ruff check hable_ya/ api/ analiza/ eval/agent/ tests/ scripts/
 
       - name: Mypy
-        run: uv run mypy hable_ya/ api/ eval/agent/
+        run: uv run mypy hable_ya/ api/ analiza/ eval/agent/
 
       - name: Pytest
         env:

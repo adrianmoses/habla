@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "analiza/output_schema_progreso_v1.json",
+  "title": "analiza progreso narrative output v1",
+  "_comment": "Documentation of the contract. analiza.narrativa.ProgresoResult is the executable source of truth — structured outputs send the schema derived from it, not this file. The pattern_id enum is generated from analiza.patrones_b2.PatternId; tests/test_analiza_narrativa.py asserts this file has not drifted from it.",
+  "type": "object",
+  "required": [
+    "lectura",
+    "patrones_prioritarios",
+    "cautelas",
+    "enfoque_proxima_sesion"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "lectura": {
+      "type": "string"
+    },
+    "patrones_prioritarios": {
+      "type": "array",
+      "maxItems": 3,
+      "_comment": "No minItems: a corpus with no recorded patterns has nothing to prioritise, and a forced row would be an invented one. Every id here must also appear in the aggregation that was sent — enforced client-side by narrativa.uncited_patterns, which the enum alone cannot express.",
+      "items": {
+        "type": "object",
+        "required": [
+          "pattern_id",
+          "por_que"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "pattern_id": {
+            "enum": [
+              "subjuntivo-tras-deseo",
+              "subjuntivo-tras-emocion-duda",
+              "subjuntivo-tras-conector-final",
+              "subjuntivo-tras-conector-condicional",
+              "subjuntivo-tras-conector-temporal",
+              "subjuntivo-tras-conector-concesivo",
+              "subjuntivo-en-relativa-indefinida",
+              "indicativo-tras-si-real",
+              "condicional-irreal-presente",
+              "condicional-irreal-pasado",
+              "preterito-vs-imperfecto",
+              "perfecto-vs-indefinido",
+              "pluscuamperfecto-uso",
+              "futuro-vs-perifrasis",
+              "gerundio-sobreusado",
+              "infinitivo-vs-subjuntivo-mismo-sujeto",
+              "conjugacion-irregular",
+              "concordancia-genero",
+              "concordancia-numero",
+              "concordancia-sujeto-verbo",
+              "genero-sustantivo-irregular",
+              "cuantificadores-indefinidos",
+              "articulo-innecesario-o-ausente",
+              "por-vs-para",
+              "regimen-verbo-preposicion",
+              "verbo-sin-preposicion",
+              "preposicion-lugar",
+              "a-personal",
+              "preposicion-tiempo",
+              "pronombre-objeto-directo-indirecto",
+              "se-impersonal-vs-pasiva",
+              "pronombre-sujeto-redundante",
+              "verbos-tipo-gustar",
+              "ser-vs-estar",
+              "haber-vs-estar",
+              "tener-vs-estar-expresiones",
+              "calco-hacer-sentido",
+              "calco-aplicar-para",
+              "calco-estoy-bueno",
+              "calco-en-orden-de",
+              "calco-la-razon-es-porque",
+              "calco-seguir-con-gerundio",
+              "calco-verbo-mas-preposicion-inglesa",
+              "calco-estructura-enfatica",
+              "falso-amigo-realizar",
+              "falso-amigo-soportar-atender",
+              "falso-amigo-eventualmente-actualmente",
+              "palabra-imprecisa",
+              "confusion-pares-minimos",
+              "coloquial-por-formal",
+              "muletillas-excesivas",
+              "autocorreccion-excesiva",
+              "conector-ausente-o-repetido",
+              "otro"
+            ]
+          },
+          "por_que": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "cautelas": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "enfoque_proxima_sesion": {
+      "type": "string"
+    }
+  }
+}

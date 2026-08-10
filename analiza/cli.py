@@ -1,7 +1,8 @@
 """CLI (spec §1): arg parsing, pipeline orchestration, exit codes.
 
 Exit codes: 0 ok · 1 transcription failed · 2 audio unreadable ·
-3 output write failed · 4 LLM failed (note still written, feedback pending).
+3 output write failed · 4 LLM failed (note still written, feedback pending) ·
+5 no corpus to report on.
 """
 
 import datetime as dt
@@ -14,15 +15,29 @@ from typing import Annotated
 
 import typer
 
-from analiza import audio, connectors, examiner, metrics, note, transcribe, vad
+from analiza import (
+    audio,
+    backfill,
+    connectors,
+    examiner,
+    historial,
+    metrics,
+    narrativa,
+    note,
+    progreso,
+    transcribe,
+    vad,
+)
 from analiza import config as config_mod
 from analiza.conectores_b2 import CONECTORES
 from analiza.examiner import PROMPT_VERSION
+from analiza.patrones_b2 import VOCAB_VERSION
 
 EXIT_TRANSCRIPTION_FAILED = 1
 EXIT_AUDIO_UNREADABLE = 2
 EXIT_OUTPUT_WRITE_FAILED = 3
 EXIT_LLM_FAILED = 4
+EXIT_NO_CORPUS = 5
 
 def _lemmatize(text: str) -> list[str]:
     """spaCy es_core_news_sm lemmas of alphabetic tokens; degrades to empty
@@ -94,6 +109,11 @@ def _stats_row(
         ),
         "whisper_model": whisper_model,
         "prompt_version": PROMPT_VERSION,
+        # Empty when no examiner ran: no pattern_ids were assigned, so no
+        # vocabulary was in play. Recording the current version anyway would
+        # tell progreso the session could have reported ids that it never had
+        # the chance to.
+        "vocab_version": VOCAB_VERSION if examiner_result is not None else "",
     }
 
 
@@ -109,8 +129,8 @@ app = typer.Typer(
 )
 
 
-@app.command()
-def main(
+@app.command("sesion")
+def sesion(
     audio_path: Annotated[
         Path,
         typer.Argument(metavar="AUDIO", help="path to .wav/.m4a/.mp3/.ogg"),
@@ -265,6 +285,179 @@ def main(
         raise typer.Exit(EXIT_OUTPUT_WRITE_FAILED) from e
 
     if llm_failed:
+        raise typer.Exit(EXIT_LLM_FAILED)
+
+
+def _fecha(valor: str | None, campo: str) -> dt.date | None:
+    if valor is None:
+        return None
+    try:
+        return dt.date.fromisoformat(valor)
+    except ValueError as e:
+        raise typer.BadParameter(
+            f"--{campo}: {valor!r} no es una fecha ISO (YYYY-MM-DD)"
+        ) from e
+
+
+@app.command("progreso")
+def progreso_cmd(
+    desde: Annotated[
+        str | None, typer.Option(help="fecha inicial inclusive (YYYY-MM-DD)")
+    ] = None,
+    hasta: Annotated[
+        str | None, typer.Option(help="fecha final inclusive (YYYY-MM-DD)")
+    ] = None,
+    ejercicio: Annotated[
+        str | None, typer.Option(help="filtrar por ejercicio (monologo | narrar-dia)")
+    ] = None,
+    vault: Annotated[
+        Path | None,
+        typer.Option(help="Obsidian vault root; reads under {vault}/Español/"),
+    ] = None,
+    out: Annotated[
+        Path | None,
+        typer.Option(help=f"plain output dir (default: ./{note.DEFAULT_OUTPUT_DIR})"),
+    ] = None,
+    no_llm: Annotated[
+        bool, typer.Option("--no-llm", help="solo agregación y nota numérica")
+    ] = False,
+    dry_run: Annotated[
+        bool, typer.Option("--dry-run", help="print note to stdout, write nothing")
+    ] = False,
+) -> None:
+    """Report progress across stored sessions: metric trends and which error
+    patterns keep coming back.
+
+    Reads analiza-stats.csv plus the stored examiner artifacts — no audio, no
+    re-transcription. The aggregation is deterministic and always written;
+    below the configured minimum session count the narrative is declined and
+    the numbers stand alone."""
+    cfg = config_mod.load_config()
+    base = _resolve_base(vault, out, cfg)
+
+    try:
+        sesiones, avisos = historial.load_sesiones(base)
+    except historial.HistorialError as e:
+        typer.echo(f"error: {e}", err=True)
+        raise typer.Exit(EXIT_NO_CORPUS) from e
+
+    hoy = dt.date.today()
+    stats = progreso.aggregate(
+        sesiones,
+        hoy=hoy,
+        parametros=cfg.progreso,
+        desde=_fecha(desde, "desde"),
+        hasta=_fecha(hasta, "hasta"),
+        ejercicio=ejercicio,
+        advertencias=avisos,
+    )
+    if stats.sesiones_n == 0:
+        typer.echo("no hay sesiones en el rango")
+        raise typer.Exit(EXIT_NO_CORPUS)
+
+    # No narrative below the gate, and no call either: declining to report is
+    # the feature (Key Decision 5), not something to pay a model to confirm.
+    lectura: narrativa.ProgresoResult | None = None
+    llm_failed = False
+    if not no_llm and stats.narrativa:
+        try:
+            lectura = narrativa.run_progreso(stats, cfg)
+        except examiner.ExaminerError as e:
+            typer.echo(
+                f"warning: la lectura falló, la nota va solo con números: {e}",
+                err=True,
+            )
+            llm_failed = True
+
+    note_md = note.render_progreso_note(
+        stats, lectura, narrativa.PROMPT_VERSION if lectura else None
+    )
+    if dry_run:
+        typer.echo(note_md)
+        raise typer.Exit(EXIT_LLM_FAILED if llm_failed else 0)
+
+    try:
+        raw = note.progreso_raw_dir(base, hoy)
+        (raw / "stats.json").write_text(stats.model_dump_json(indent=2))
+        if lectura is not None:
+            # Envelope, like backfill.json: the prompt version has to travel
+            # with the prose, because a prompt change breaks comparability
+            # between two reports exactly as it does between two sessions.
+            (raw / "progreso.json").write_text(
+                json.dumps(
+                    {
+                        "prompt_version": narrativa.PROMPT_VERSION,
+                        "fecha": hoy.isoformat(),
+                        "model": cfg.llm_model,
+                        "lectura": lectura.model_dump(),
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+        path = note.progreso_note_path(base, hoy)
+        note.write_note(path, note_md)
+    except (note.OutputWriteError, OSError) as e:
+        typer.echo(f"error: output write failed: {e}", err=True)
+        raise typer.Exit(EXIT_OUTPUT_WRITE_FAILED) from e
+
+    typer.echo(f"wrote {path}")
+    if llm_failed:
+        raise typer.Exit(EXIT_LLM_FAILED)
+    if not stats.narrativa:
+        typer.echo(
+            f"note: {progreso.plural(stats.sesiones_n, 'sesión', 'sesiones')}, "
+            f"por debajo del mínimo de {cfg.progreso.min_sesiones}: "
+            "agregación escrita, sin lectura",
+            err=True,
+        )
+
+
+@app.command("backfill-patrones")
+def backfill_patrones(
+    vault: Annotated[
+        Path | None,
+        typer.Option(help="Obsidian vault root; reads under {vault}/Español/"),
+    ] = None,
+    out: Annotated[
+        Path | None,
+        typer.Option(help=f"plain output dir (default: ./{note.DEFAULT_OUTPUT_DIR})"),
+    ] = None,
+    dry_run: Annotated[
+        bool, typer.Option("--dry-run", help="report assignments, write nothing")
+    ] = False,
+) -> None:
+    """Assign pattern_id to stored sessions examined before the vocabulary.
+
+    Reads persisted examiner.json artifacts and classifies each error row
+    against patrones_b2 — no audio, no re-transcription. Idempotent: sessions
+    that already carry pattern_id are skipped."""
+    cfg = config_mod.load_config()
+    base = _resolve_base(vault, out, cfg)
+
+    outcomes = backfill.backfill_all(
+        base, cfg, dry_run=dry_run, today=dt.date.today()
+    )
+    if not outcomes:
+        typer.echo(f"no stored sessions under {base / 'analiza-raw'}")
+        return
+
+    for o in outcomes:
+        sesion_name = o.path.parent.name
+        detail = f" — {o.detail}" if o.detail else ""
+        count = f" ({o.assigned} patrones)" if o.assigned else ""
+        typer.echo(f"{o.status:8} {sesion_name}{count}{detail}")
+
+    failed = [o for o in outcomes if o.status == "failed"]
+    assigned = sum(1 for o in outcomes if o.status == "assigned")
+    typer.echo(
+        f"\n{assigned} assigned, "
+        f"{sum(1 for o in outcomes if o.status == 'skipped')} skipped, "
+        f"{len(failed)} failed"
+    )
+    # A failed file leaves the rest of the corpus correctly assigned; exit
+    # non-zero so a scripted run notices, but never abort mid-walk.
+    if failed:
         raise typer.Exit(EXIT_LLM_FAILED)
 
 
