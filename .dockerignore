@@ -7,6 +7,8 @@
 models
 notebooks
 data
+# Practice recordings for analiza — MBs each, and the CLI runs on the host
+grabaciones
 unsloth_compiled_cache
 runtime_turns.jsonl
 
