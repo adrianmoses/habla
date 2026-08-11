@@ -212,9 +212,10 @@ uv sync --extra analiza
 # it arrives with the sync, no `spacy download` step needed.
 # ffmpeg must be on PATH; ANTHROPIC_API_KEY for the examiner pass
 
-uv run analiza sesion grabacion.m4a --tema "mi fin de semana"
-uv run analiza sesion grabacion.m4a --no-llm --dry-run  # metrics only, to stdout
-uv run analiza progreso --desde 2026-06-01              # read across sessions
+# Recordings live in grabaciones/ (git- and docker-ignored), not the repo root
+uv run analiza sesion grabaciones/grabacion.m4a --tema "mi fin de semana"
+uv run analiza sesion grabaciones/grabacion.m4a --no-llm --dry-run  # metrics only, to stdout
+uv run analiza progreso --desde 2026-06-01                          # read across sessions
 ```
 
 Transcription runs on the GPU when the CUDA runtime libs are present and falls
