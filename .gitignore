@@ -270,3 +270,5 @@ tests/e2e/screenshots/
 
 # analiza default output dir (--out / --vault redirect it elsewhere)
 /analiza-out/
+
+.claude/
