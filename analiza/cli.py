@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
+from dotenv import find_dotenv, load_dotenv
 
 from analiza import (
     audio,
@@ -127,6 +128,18 @@ app = typer.Typer(
         "prompt_versions are not comparable."
     ),
 )
+
+
+@app.callback()
+def _bootstrap() -> None:
+    # Load .env before any command so the examiner's ANTHROPIC_API_KEY works
+    # without an explicit export. Anchored at the cwd rather than this file's
+    # directory: the key belongs to the project you are standing in, and an
+    # installed (non-editable) analiza would otherwise search site-packages.
+    # Non-overriding by default, so a variable already exported wins over a
+    # stale file. A missing .env is a silent no-op — the vault-less path is
+    # supported, and --no-llm needs no key at all.
+    load_dotenv(find_dotenv(usecwd=True))
 
 
 @app.command("sesion")
